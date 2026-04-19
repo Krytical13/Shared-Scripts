@@ -23,42 +23,6 @@ Folder names are self-explanatory. Browse the one that matches what you're tryin
 
 ---
 
-## Finding what you need
-
-Every script has full [comment-based help](https://learn.microsoft.com/powershell/scripting/developer/help/writing-comment-based-help-topics) — synopsis, description, parameters, examples, and notes. To inspect any script without running it:
-
-```powershell
-Get-Help .\Path\To\Script-Name.ps1 -Full
-```
-
-That's the authoritative source for what a script does, what it needs, and how to invoke it.
-
----
-
-## Prerequisites (general)
-
-- **Windows PowerShell 5.1** or **PowerShell 7.x** (per-script minimums declared via `#Requires`)
-- Whatever modules and Graph/Exchange/AD permissions a given script needs — listed in its `.NOTES` block
-- An account with the right roles for the system being touched
-
-Scripts won't fail silently — if a module or scope is missing, you'll get a clear error with an install or consent hint.
-
----
-
-## Quick start
-
-```powershell
-# Clone or download the repo, then pick a script and read its help:
-Get-Help .\Entra\Some-Script.ps1 -Full
-
-# Run it:
-.\Entra\Some-Script.ps1
-```
-
-Most scripts default their output to `$env:USERPROFILE\Documents\<Something>\` and accept a `-LogPath` parameter if you want to redirect.
-
----
-
 ## License
 
 [MIT](./LICENSE) — use, modify, and redistribute freely. No warranty.
