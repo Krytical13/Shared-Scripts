@@ -20,19 +20,18 @@
          Full context at the moment of selection.
 
       2. Live Graph query (fallback): if you decline or no CSV is found, the
-         script queries Entra live, classifies groups by type, cross-references
-         AD for scope/DN, and shows a simpler picker.
+         script queries Entra live and shows a simpler picker.
 
     Compatibility rules (applied in live mode; the readiness CSV has already
     filtered these out):
       - Dynamic-membership groups: not supported for SOA conversion.
       - M365 (Unified) groups: not in scope for this tool.
-      - AD object must resolve by OnPremisesSecurityIdentifier (sync linkage
-        sanity check).
+      - OnPremisesSecurityIdentifier must be present on the Entra group
+        (sync linkage sanity check).
 
-    AD group scope (Universal/Global/DomainLocal) does NOT gate the conversion.
-    That requirement only applies if you later provision the group back to AD
-    DS via Cloud Sync.
+    This script is pure Microsoft Graph; it does not query on-prem AD. It
+    can run from any machine with network access to graph.microsoft.com;
+    no RSAT, no domain connectivity required.
 
 .PARAMETER LogPath
     Folder to write the CSV audit log. Default:
@@ -69,11 +68,11 @@
     lines to the console as it runs, plus a final summary.
 
 .NOTES
-    Version:     1.1
+    Version:     1.2
     Author:      Brandon
     Released:    2026-04-19
     Tested on:   Windows PowerShell 5.1 and PowerShell 7.x with
-                 Microsoft.Graph 2.x and RSAT ActiveDirectory module.
+                 Microsoft.Graph 2.x.
 
     WRITE OPERATIONS:
         Unlike Get-GroupSOAReadiness.ps1 (read-only), this script MODIFIES
@@ -85,8 +84,6 @@
     REQUIRED PERMISSIONS:
         - Graph scopes: Group.Read.All, Group-OnPremisesSyncBehavior.ReadWrite.All
         - Role: Hybrid Administrator (least-privileged role for the SOA PATCH).
-        - Local: read access to AD (any domain user is usually enough for
-          Get-ADGroup lookups in live mode).
 
     API VERSION NOTE:
         The onPremisesSyncBehavior resource is documented in the Microsoft
@@ -187,21 +184,8 @@ if ($missingGraphModules.Count -gt 0) {
     }
 }
 
-# ActiveDirectory module is an RSAT feature, not a PSGallery module, so we can't
-# offer to Install-Module it. Guide the user to enable it instead.
-if (-not (Get-Module -ListAvailable -Name 'ActiveDirectory')) {
-    Write-Host ""
-    Write-Error "The ActiveDirectory module is required but not installed. It ships as part of RSAT."
-    Write-Host "To install on Windows 10/11 (elevated PowerShell):" -ForegroundColor Yellow
-    Write-Host "  Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0" -ForegroundColor Yellow
-    Write-Host "On Windows Server:" -ForegroundColor Yellow
-    Write-Host "  Install-WindowsFeature RSAT-AD-PowerShell" -ForegroundColor Yellow
-    return
-}
-
 Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
 Import-Module Microsoft.Graph.Groups -ErrorAction Stop
-Import-Module ActiveDirectory -ErrorAction Stop
 
 # Out-GridView guard (PS 7 on non-Windows doesn't ship it by default)
 if (-not (Get-Command Out-GridView -ErrorAction SilentlyContinue)) {
@@ -285,18 +269,12 @@ if ($useReadinessCsv) {
     }
 
     # Normalize columns the conversion/audit pipeline expects. The readiness CSV
-    # uses 'Type' for the group type; map it to GroupType. Also backfill columns
-    # that live-mode produces (ADScope, ADDistinguishedName, Compatible, Issues)
-    # with safe defaults so downstream code doesn't need to special-case modes.
+    # uses 'Type' for the group type; map it to GroupType. Also backfill the
+    # Compatible/Issues columns that live-mode produces, with safe defaults so
+    # downstream code doesn't need to special-case modes.
     foreach ($row in $results) {
         if (-not $row.PSObject.Properties['GroupType']) {
             $row | Add-Member -NotePropertyName GroupType -NotePropertyValue $row.Type -Force
-        }
-        if (-not $row.PSObject.Properties['ADScope']) {
-            $row | Add-Member -NotePropertyName ADScope -NotePropertyValue 'n/a (CSV)' -Force
-        }
-        if (-not $row.PSObject.Properties['ADDistinguishedName']) {
-            $row | Add-Member -NotePropertyName ADDistinguishedName -NotePropertyValue $null -Force
         }
         # Readiness CSV rows are pre-filtered to convertible types, so treat as compatible.
         if (-not $row.PSObject.Properties['Compatible']) {
@@ -369,44 +347,26 @@ else {
 
         if ($groupType -notin $includeTypes) { continue }
 
-        # AD lookup for scope and status (informational)
-        $adScope = 'Unknown'
-        $adExists = $false
-        $adDN = $null
-        $adError = $null
-
-        if ($g.OnPremisesSecurityIdentifier) {
-            try {
-                $adGroup = Get-ADGroup -Identity $g.OnPremisesSecurityIdentifier `
-                    -Properties GroupScope, DistinguishedName -ErrorAction Stop
-                $adScope = $adGroup.GroupScope.ToString()
-                $adExists = $true
-                $adDN = $adGroup.DistinguishedName
-            }
-            catch {
-                $adError = $_.Exception.Message
-            }
-        }
-
         $compatible = $true
         $reasons = @()
 
         if ($groupType -eq 'Dynamic')   { $compatible = $false; $reasons += 'Dynamic membership not supported' }
         if ($groupType -eq 'M365Group') { $compatible = $false; $reasons += 'M365 Groups not in scope for this tool' }
-        if (-not $adExists)             { $compatible = $false; $reasons += "AD object not found ($adError)" }
+        if (-not $g.OnPremisesSecurityIdentifier) {
+            $compatible = $false
+            $reasons += 'Missing OnPremisesSecurityIdentifier (sync linkage issue)'
+        }
 
         [PSCustomObject]@{
-            DisplayName        = $g.DisplayName
-            Mail               = $g.Mail
-            GroupType          = $groupType
-            ADScope            = $adScope
-            ADDistinguishedName= $adDN
-            Compatible         = $compatible
-            Issues             = ($reasons -join '; ')
-            EntraObjectId      = $g.Id
-            OnPremSamAccount   = $g.OnPremisesSamAccountName
-            OnPremSID          = $g.OnPremisesSecurityIdentifier
-            Description        = $g.Description
+            DisplayName      = $g.DisplayName
+            Mail             = $g.Mail
+            GroupType        = $groupType
+            Compatible       = $compatible
+            Issues           = ($reasons -join '; ')
+            EntraObjectId    = $g.Id
+            OnPremSamAccount = $g.OnPremisesSamAccountName
+            OnPremSID        = $g.OnPremisesSecurityIdentifier
+            Description      = $g.Description
         }
     }
 
@@ -453,10 +413,8 @@ $skipAuditRows = foreach ($group in $toSkip) {
         DisplayName   = $group.DisplayName
         Mail          = $group.Mail
         GroupType     = $group.GroupType
-        ADScope       = $group.ADScope
         EntraObjectId = $group.EntraObjectId
         OnPremSID     = $group.OnPremSID
-        ADDN          = $group.ADDistinguishedName
         Status        = 'Skipped'
         Error         = $group.Issues
     }
@@ -474,7 +432,7 @@ if ($toConvert.Count -eq 0) {
 # ----- Confirmation prompt -----
 Write-Host "`n=== Ready to Convert ===" -ForegroundColor Cyan
 Write-Host "The following $($toConvert.Count) group(s) will be converted to cloud-managed:`n"
-$toConvert | Format-Table DisplayName, GroupType, ADScope, Mail -AutoSize
+$toConvert | Format-Table DisplayName, GroupType, Mail -AutoSize
 
 $confirm = Read-Host "Convert $($toConvert.Count) group(s)? [y/N]"
 if ($confirm -notmatch '^[Yy]') {
@@ -510,10 +468,8 @@ $convertAuditRows = foreach ($group in $toConvert) {
         DisplayName   = $group.DisplayName
         Mail          = $group.Mail
         GroupType     = $group.GroupType
-        ADScope       = $group.ADScope
         EntraObjectId = $group.EntraObjectId
         OnPremSID     = $group.OnPremSID
-        ADDN          = $group.ADDistinguishedName
         Status        = $status
         Error         = $errorMsg
     }
