@@ -69,9 +69,9 @@
     lines to the console as it runs, plus a final summary.
 
 .NOTES
-    Version:     1.0
-    Author:      Brandon Inabinet
-    Released:    2026-04-18
+    Version:     1.1
+    Author:      Brandon
+    Released:    2026-04-19
     Tested on:   Windows PowerShell 5.1 and PowerShell 7.x with
                  Microsoft.Graph 2.x and RSAT ActiveDirectory module.
 
@@ -520,9 +520,20 @@ $convertAuditRows = foreach ($group in $toConvert) {
 }
 
 # ----- Write log (converted + skipped) -----
-$auditResults = @($convertAuditRows) + @($skipAuditRows)
-$auditResults | Export-Csv -Path $logFile -NoTypeInformation
-Write-Host "`nAudit log written to: $logFile" -ForegroundColor Green
+# Guard against null rows: an empty foreach assigns $null, and in PS 7 @($null)
+# produces a 1-element array containing null rather than an empty array, which
+# makes Export-Csv complain mid-pipeline. Build the list defensively instead.
+$auditResults = @()
+if ($convertAuditRows) { $auditResults = @($convertAuditRows) }
+if ($skipAuditRows)    { $auditResults += @($skipAuditRows) }
+
+if ($auditResults.Count -gt 0) {
+    $auditResults | Export-Csv -Path $logFile -NoTypeInformation
+    Write-Host "`nAudit log written to: $logFile" -ForegroundColor Green
+}
+else {
+    Write-Host "`nNo rows to log." -ForegroundColor Yellow
+}
 
 # ----- Summary -----
 $successCount = ($auditResults | Where-Object Status -eq 'Converted').Count
