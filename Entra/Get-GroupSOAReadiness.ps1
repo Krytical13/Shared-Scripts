@@ -1,5 +1,4 @@
 #Requires -Version 5.1
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Groups, Microsoft.Graph.Users
 
 <#
 .SYNOPSIS
@@ -12,9 +11,9 @@
     actually affect conversion blast radius: cloud-only members, nesting, group-based
     licensing, Conditional Access references, and role-assignable groups.
 
-    Output is a single CSV sorted by a simple safety rank — lowest rank = safest to
-    convert first. Use this to build a conversion backlog, then feed the safe ones into
-    a companion converter script.
+    Output is a single CSV sorted by a simple safety rank. Lowest rank equals safest
+    to convert first. Use this to build a conversion backlog, then feed the safe ones
+    into a companion converter script.
 
     Ranking weights (edit in the script if they don't match your risk model):
       +1  per total member
@@ -25,9 +24,14 @@
       +20 referenced by a Conditional Access policy
       +30 role-assignable group (isAssignableToRole = true)
 
-    Runtime expectation: ~2 Graph calls per synced group (members + memberOf). Plan on
-    several minutes on a tenant with hundreds of synced groups. The output CSV is your
-    cache — re-run weekly, not every session.
+    Runtime expectation: about 2 Graph calls per synced group (members + memberOf).
+    Plan on several minutes on a tenant with hundreds of synced groups. The output CSV
+    is your cache -- re-run weekly, not every session.
+
+    Required modules: Microsoft.Graph.Authentication, Microsoft.Graph.Groups,
+    Microsoft.Graph.Users, and (unless -SkipConditionalAccessCheck is used)
+    Microsoft.Graph.Identity.SignIns. If any are missing the script will prompt to
+    install them for the current user before continuing.
 
 .PARAMETER LogPath
     Folder to write the CSV. Default: $env:USERPROFILE\Documents\HybridRecon
@@ -65,7 +69,7 @@
     safest-candidates table to the console.
 
 .NOTES
-    Version:     1.0
+    Version:     1.2
     Author:      Brandon Iverson
     Released:    2026-04-18
     Tested on:   Windows PowerShell 5.1 and PowerShell 7.x with Microsoft.Graph 2.x.
@@ -86,7 +90,7 @@
 
     DISCLAIMER:
         Not affiliated with or endorsed by Microsoft. This script is read-only and
-        does NOT perform SOA conversions — it only reports on the landscape. SOA
+        does NOT perform SOA conversions, it only reports on the landscape. SOA
         conversion itself affects Exchange Online, licensing, Conditional Access, and
         other downstream systems; validate in a non-production tenant and understand
         the Microsoft guidance before acting on this script's output.
@@ -102,6 +106,11 @@
       - Service principals / enterprise apps assigned the group as an owner
       - Intune / SCCM / GPO-driven membership automation
       Review those separately for groups that end up high in the conversion backlog.
+
+    TROUBLESHOOTING:
+      If Graph cmdlets fail with "Could not load file or assembly", your
+      Microsoft.Graph modules likely have mixed 1.x/2.x versions installed. Uninstall
+      all Microsoft.Graph* modules and reinstall the ones this script uses.
 #>
 
 [CmdletBinding()]
@@ -114,12 +123,47 @@ param(
     [switch]$SkipConditionalAccessCheck
 )
 
-# ----- Optional module check (hard deps are handled by #Requires above) -----
+# ----- Module check: prompt to install anything missing -----
+$requiredModules = @(
+    'Microsoft.Graph.Authentication',
+    'Microsoft.Graph.Groups',
+    'Microsoft.Graph.Users'
+)
 if (-not $SkipConditionalAccessCheck) {
-    if (-not (Get-Module -ListAvailable -Name 'Microsoft.Graph.Identity.SignIns')) {
-        Write-Error "Microsoft.Graph.Identity.SignIns is required for the Conditional Access scan. Install with: Install-Module Microsoft.Graph.Identity.SignIns -Scope CurrentUser  — or re-run with -SkipConditionalAccessCheck."
+    $requiredModules += 'Microsoft.Graph.Identity.SignIns'
+}
+
+$missingModules = @($requiredModules | Where-Object { -not (Get-Module -ListAvailable -Name $_) })
+
+if ($missingModules.Count -gt 0) {
+    Write-Host ""
+    Write-Host "The following required module(s) are not installed:" -ForegroundColor Yellow
+    $missingModules | ForEach-Object { Write-Host "  - $_" -ForegroundColor Yellow }
+    Write-Host ""
+    $answer = Read-Host "Install them now for the current user? [Y/n]"
+    if ($answer -match '^[Nn]') {
+        Write-Error "Required module(s) missing. Exiting."
         return
     }
+
+    foreach ($mod in $missingModules) {
+        Write-Host "Installing $mod ..." -ForegroundColor Cyan
+        try {
+            Install-Module -Name $mod -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+            Write-Host "  Installed $mod." -ForegroundColor Green
+        }
+        catch {
+            Write-Error "Failed to install '$mod': $($_.Exception.Message)"
+            return
+        }
+    }
+}
+
+# Import what we need (auto-loading handles most of this, but being explicit is harmless)
+Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+Import-Module Microsoft.Graph.Groups -ErrorAction Stop
+Import-Module Microsoft.Graph.Users -ErrorAction Stop
+if (-not $SkipConditionalAccessCheck) {
     Import-Module Microsoft.Graph.Identity.SignIns -ErrorAction Stop
 }
 
@@ -205,7 +249,7 @@ Write-Host "  $($candidates.Count) candidates after type filter ($($IncludeTypes
 # ----- Build synced-user ID set for correct cloud-only detection -----
 # Get-MgGroupMember returns DirectoryObjects without onPremisesSyncEnabled by default, so
 # per-member checks can't see that property. Instead, pull all synced user IDs once and
-# test membership against the set — O(1) lookup, correct result.
+# test membership against the set. O(1) lookup, correct result.
 Write-Host "Building synced-user ID index for cloud-only member detection..." -ForegroundColor Cyan
 $syncedUserIds = [System.Collections.Generic.HashSet[string]]::new()
 try {
@@ -251,7 +295,7 @@ foreach ($g in $candidates) {
     $hasNestedChildren = $nestedChildren.Count -gt 0
 
     # Count cloud-only members: users whose Id is NOT in the synced-user index.
-    # (Reading onPremisesSyncEnabled off $um.AdditionalProperties doesn't work — the
+    # (Reading onPremisesSyncEnabled off $um.AdditionalProperties doesn't work; the
     # Get-MgGroupMember default projection omits that property.)
     $cloudOnlyMemberCount = 0
     foreach ($um in $userMembers) {
