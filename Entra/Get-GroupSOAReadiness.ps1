@@ -70,7 +70,7 @@
 
 .NOTES
     Version:     1.2
-    Author:      Brandon Iverson
+    Author:      Brandon Inabinet
     Released:    2026-04-18
     Tested on:   Windows PowerShell 5.1 and PowerShell 7.x with Microsoft.Graph 2.x.
 
