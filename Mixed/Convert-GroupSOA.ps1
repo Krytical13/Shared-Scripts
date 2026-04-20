@@ -68,9 +68,9 @@
     lines to the console as it runs, plus a final summary.
 
 .NOTES
-    Version:     1.2
+    Version:     1.3
     Author:      Brandon
-    Released:    2026-04-19
+    Released:    2026-04-20
     Tested on:   Windows PowerShell 5.1 and PowerShell 7.x with
                  Microsoft.Graph 2.x.
 
@@ -453,7 +453,10 @@ $convertAuditRows = foreach ($group in $toConvert) {
     try {
         $uri = "https://graph.microsoft.com/v1.0/groups/$($group.EntraObjectId)/onPremisesSyncBehavior"
         $body = @{ isCloudManaged = $true } | ConvertTo-Json
-        Invoke-MgGraphRequest -Uri $uri -Method PATCH -Body $body -ContentType "application/json" -ErrorAction Stop
+        # Suppress any pipeline output from Invoke-MgGraphRequest. On 204 responses
+        # some module versions emit a null into the stream, which gets captured by
+        # the surrounding foreach and confuses Export-Csv later.
+        $null = Invoke-MgGraphRequest -Uri $uri -Method PATCH -Body $body -ContentType "application/json" -ErrorAction Stop
         $status = 'Converted'
         Write-Host "  [OK]   $($group.DisplayName)" -ForegroundColor Green
     }
@@ -476,12 +479,12 @@ $convertAuditRows = foreach ($group in $toConvert) {
 }
 
 # ----- Write log (converted + skipped) -----
-# Guard against null rows: an empty foreach assigns $null, and in PS 7 @($null)
-# produces a 1-element array containing null rather than an empty array, which
-# makes Export-Csv complain mid-pipeline. Build the list defensively instead.
+# Guard against null rows: empty foreach produces $null, and some cmdlets can
+# leak nulls into the pipeline even on success. Filter defensively so Export-Csv
+# doesn't choke on null elements mid-stream.
 $auditResults = @()
-if ($convertAuditRows) { $auditResults = @($convertAuditRows) }
-if ($skipAuditRows)    { $auditResults += @($skipAuditRows) }
+if ($convertAuditRows) { $auditResults += @($convertAuditRows | Where-Object { $_ }) }
+if ($skipAuditRows)    { $auditResults += @($skipAuditRows    | Where-Object { $_ }) }
 
 if ($auditResults.Count -gt 0) {
     $auditResults | Export-Csv -Path $logFile -NoTypeInformation
