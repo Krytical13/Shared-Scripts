@@ -70,7 +70,7 @@
 
 .NOTES
     Version:     1.2
-    Author:      Brandon Inabinet
+    Author:      Brandon
     Released:    2026-04-18
     Tested on:   Windows PowerShell 5.1 and PowerShell 7.x with Microsoft.Graph 2.x.
 
@@ -108,9 +108,17 @@
       Review those separately for groups that end up high in the conversion backlog.
 
     TROUBLESHOOTING:
-      If Graph cmdlets fail with "Could not load file or assembly", your
-      Microsoft.Graph modules likely have mixed 1.x/2.x versions installed. Uninstall
-      all Microsoft.Graph* modules and reinstall the ones this script uses.
+      - "Could not load file or assembly" on Graph cmdlets: your Microsoft.Graph
+        modules likely have mixed versions installed. Uninstall all Microsoft.Graph*
+        modules and reinstall only the ones this script uses.
+
+      - TypeLoadException on 'GetTokenAsync' / 'UserProvidedTokenCredential': known
+        Microsoft.Graph SDK bug that surfaces in hosted runtimes (notably the VSCode
+        PowerShell extension on Windows PowerShell 5.1). See
+        https://github.com/microsoftgraph/msgraph-sdk-powershell/issues/3479
+        Fix: run the script in PowerShell 7 (its per-module AssemblyLoadContext avoids
+        the conflict), or run from a standalone Windows PowerShell window rather than
+        VSCode's integrated console.
 #>
 
 [CmdletBinding()]
