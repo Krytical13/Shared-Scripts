@@ -62,6 +62,14 @@ function Set-Progress {
 function Set-UiBusy {
     param([bool]$Busy)
     if (-not $script:UI -or -not $script:UI.Form) { return }
+    $script:UI.Busy = $Busy
     $script:UI.Form.Cursor = if ($Busy) { [System.Windows.Forms.Cursors]::WaitCursor } else { [System.Windows.Forms.Cursors]::Default }
+    # Block re-entrant input while a long Graph/AD/EXO call runs: Set-Progress pumps DoEvents(), so
+    # without this a second click would re-enter Save/Delete/Connect mid-operation. Disable only the
+    # tab area + the Connect/Switch button (both are unconditionally enabled when idle, so restoring
+    # them on completion is always correct -- unlike DisconnectBtn, whose state is connection-driven).
+    foreach ($c in @($script:UI.Tabs, $script:UI.ConnectBtn)) {
+        if ($c) { $c.Enabled = -not $Busy }
+    }
     [System.Windows.Forms.Application]::DoEvents()
 }

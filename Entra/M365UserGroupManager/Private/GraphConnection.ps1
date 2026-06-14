@@ -4,9 +4,11 @@
     Interactive (delegated) sign-in. We request the full scope set on EVERY connect (re-connect
     is additive at the consent level, but the session token isn't guaranteed to carry the union
     of previously-granted scopes -- e.g. Conditional Access can withhold one -- so we always ask
-    for everything we need). Sign-in uses -ContextScope Process so tokens are not cached across
-    PowerShell sessions, which suits a tool that hops between tenants. Switching tenants
-    Disconnect-MgGraph first, then Connect-MgGraph -TenantId <other> -- the documented clean path.
+    for everything we need). Sign-in uses -ContextScope CurrentUser so the MSAL token cache PERSISTS
+    -- that is what lets the account switcher re-connect a recently-used tenant silently (no prompt).
+    Switching tenants therefore does NOT Disconnect-MgGraph first (that would clear the cache and
+    force a fresh prompt); it just calls Connect-MgGraph -TenantId <other>. Only the explicit
+    Disconnect button clears the cache.
 #>
 
 # Delegated scopes for create/modify of users and groups (+ license assignment). Directory.*

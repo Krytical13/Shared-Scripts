@@ -524,11 +524,17 @@ function Set-TabHybridGating {
     $adAvailable = [bool]($cap -and $cap.Available)
     # On-prem-mastered fields that still can't be routed to AD even when on-prem editing works.
     $adUneditable = @('owners')   # AD groups have no clean multi-owner equivalent (managedBy is single)
+    # Scalar fields with no cloud->AD attribute mapping can't be written on-prem either -- keep them
+    # read-only rather than letting a synced-object edit be silently discarded on save.
+    $adMap = if ($Tab -eq 'User') { Get-CloudToAdAttributeMap } else { Get-CloudToAdGroupAttributeMap }
 
     foreach ($field in $ctx.Order) {
         $state = Get-FieldHybridState -Attr $field.Attr -Object $Object
         if (-not $state.OnPremMastered) { continue }
         $canAdEdit = $adAvailable -and ($adUneditable -notcontains $field.Attr.Name)
+        if ($canAdEdit -and ($field.Attr.Input -in 'Text', 'Multi', 'Choice', 'ExtAttr', 'Date') -and (-not $adMap.ContainsKey($field.Attr.Name))) {
+            $canAdEdit = $false   # unmapped scalar (e.g. otherMails) -> not on-prem-writable
+        }
         if ($canAdEdit) {
             # Leave the field editable; the save routes this change to on-prem AD.
             if ($field.Main -and $script:UI.Tooltip) {
@@ -819,7 +825,7 @@ function Save-SyncedGroupToAd {
     if ($memField -and (Test-FieldDirty $memField)) {
         $res = Sync-AdGroupMembership -AdGroup $adGroup -Dc $dc -Now $memField.People -Original $memField.OriginalPeople
         $changed = $true
-        foreach ($u in $res.Unresolved) { [void]$warnings.Add("Member '$u' wasn't found in AD by UPN; not changed on-prem.") }
+        foreach ($w in $res.Warnings) { [void]$warnings.Add($w) }
     }
     return @{ Changed = $changed; Warnings = $warnings.ToArray() }
 }
@@ -925,11 +931,14 @@ function Invoke-SaveGroup {
         $created = New-DirectoryGroup -Body $body
         $gid = Get-GraphVal $created 'id'
 
-        Add-PeopleToGroup -GroupId $gid -Field $ownField -AsOwner
-        Add-PeopleToGroup -GroupId $gid -Field $memField
+        $failures = @()
+        $failures += Add-PeopleToGroup -GroupId $gid -Field $ownField -AsOwner
+        $failures += Add-PeopleToGroup -GroupId $gid -Field $memField
 
         Set-Progress "Created group $(Get-GraphVal $created 'displayName')."
-        [System.Windows.Forms.MessageBox]::Show("Group created:`n$(Get-GraphVal $created 'displayName')", 'Group created', 'OK', 'Information') | Out-Null
+        $cmsg = "Group created:`n$(Get-GraphVal $created 'displayName')"
+        if ($failures.Count) { $cmsg += "`n`nBut some members/owners were not added:`n  " + ($failures -join "`n  ") }
+        [System.Windows.Forms.MessageBox]::Show($cmsg, $(if ($failures.Count) { 'Group created with warnings' } else { 'Group created' }), 'OK', $(if ($failures.Count) { 'Warning' } else { 'Information' })) | Out-Null
         $ctx.ModeEdit.Checked = $true
         Import-GroupIntoForm -Group (Get-GroupById -Id $gid)
         return
@@ -954,8 +963,8 @@ function Invoke-SaveGroup {
         # Cloud-only group (or synced group with no on-prem access -> fields read-only, nothing dirty).
         $body = Build-GroupPayload -Mode 'Edit'
         if ($body.Count -gt 0) { Set-Progress 'Updating group...'; Update-DirectoryGroup -Id $gid -Body $body | Out-Null; $changed = $true }
-        if ($memField -and (Test-FieldDirty $memField)) { Sync-GroupRelationship -GroupId $gid -Field $memField; $changed = $true }
-        if ($ownField -and (Test-FieldDirty $ownField)) { Sync-GroupRelationship -GroupId $gid -Field $ownField -AsOwner; $changed = $true }
+        if ($memField -and (Test-FieldDirty $memField)) { $warnings += Sync-GroupRelationship -GroupId $gid -Field $memField; $changed = $true }
+        if ($ownField -and (Test-FieldDirty $ownField)) { $warnings += Sync-GroupRelationship -GroupId $gid -Field $ownField -AsOwner; $changed = $true }
     }
 
     if (-not $changed) { Set-Progress 'No changes to save.'; return }
@@ -968,33 +977,41 @@ function Invoke-SaveGroup {
 }
 
 function Add-PeopleToGroup {
-    <# Add all currently-selected people in a Person field to a freshly-created group. #>
+    <# Add all currently-selected people in a Person field to a freshly-created group. Returns any
+       per-member failure messages so the caller can surface a partial result (not silently 'saved'). #>
     param([string]$GroupId, $Field, [switch]$AsOwner)
-    if (-not $Field) { return }
-    foreach ($p in @($Field.People)) {
+    $failures = New-Object System.Collections.Generic.List[string]
+    if (-not $Field) { return $failures.ToArray() }
+    # Iterate the List directly -- NEVER @($Field.People): @() over a List of hashtables throws
+    # "Argument types do not match" on BOTH Windows PowerShell 5.1 and PowerShell 7.
+    foreach ($p in $Field.People) {
         try {
             if ($AsOwner) { Add-GroupOwner -GroupId $GroupId -ObjectId $p.Id } else { Add-GroupMember -GroupId $GroupId -ObjectId $p.Id }
         } catch {
-            Set-Progress "Could not add $($p.DisplayName): $($_.Exception.Message)"
+            [void]$failures.Add("Could not add $($p.DisplayName): $($_.Exception.Message)")
         }
     }
+    return $failures.ToArray()
 }
 
 function Sync-GroupRelationship {
-    <# Apply the add/remove diff between a Person field's current and original ids. #>
+    <# Apply the add/remove diff between a Person field's current and original ids. Returns any
+       per-member failure messages so the caller can report a partial result. #>
     param([string]$GroupId, $Field, [switch]$AsOwner)
+    $failures = New-Object System.Collections.Generic.List[string]
     $now = @($Field.People | ForEach-Object { $_.Id })
     $orig = @($Field.OriginalIds)
     $add = @($now | Where-Object { $orig -notcontains $_ })
     $remove = @($orig | Where-Object { $now -notcontains $_ })
     foreach ($id in $add) {
         try { if ($AsOwner) { Add-GroupOwner -GroupId $GroupId -ObjectId $id } else { Add-GroupMember -GroupId $GroupId -ObjectId $id } }
-        catch { Set-Progress "Add failed: $($_.Exception.Message)" }
+        catch { [void]$failures.Add("Add failed: $($_.Exception.Message)") }
     }
     foreach ($id in $remove) {
         try { if ($AsOwner) { Remove-GroupOwner -GroupId $GroupId -ObjectId $id } else { Remove-GroupMember -GroupId $GroupId -ObjectId $id } }
-        catch { Set-Progress "Remove failed: $($_.Exception.Message)" }
+        catch { [void]$failures.Add("Remove failed: $($_.Exception.Message)") }
     }
+    return $failures.ToArray()
 }
 
 #endregion

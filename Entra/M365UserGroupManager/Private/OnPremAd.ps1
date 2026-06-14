@@ -85,12 +85,22 @@ function Get-AdWriteCapability {
 
 # --- Cloud -> on-prem object mapping -------------------------------------------------------
 
+function Protect-AdFilterValue {
+    <# Escape a data value for safe use inside an AD -Filter single-quoted token. The AD filter
+       parser auto-escapes the LDAP metacharacters * ( ) / \ inside quotes, but a literal single
+       quote is NOT auto-escaped and must be doubled -- otherwise a value like o'brien@contoso.com
+       breaks the filter and the lookup silently returns nothing. #>
+    param([string]$Value)
+    if ($null -eq $Value) { return '' }
+    return ($Value -replace "'", "''")
+}
+
 function Get-AdUserForCloudObject {
     <# Find the on-prem AD user for a synced cloud user: sAMAccountName first, then DN. $null if not found. #>
     param($Object, [string]$Dc)
     $sam = Get-GraphVal $Object 'onPremisesSamAccountName'
     if ($sam) {
-        $u = Get-ADUser -Filter "sAMAccountName -eq '$sam'" -Server $Dc -ErrorAction SilentlyContinue
+        $u = Get-ADUser -Filter "sAMAccountName -eq '$(Protect-AdFilterValue $sam)'" -Server $Dc -ErrorAction SilentlyContinue
         if ($u) { return $u }
     }
     $dn = Get-GraphVal $Object 'onPremisesDistinguishedName'
@@ -103,7 +113,7 @@ function Get-AdGroupForCloudObject {
     param($Object, [string]$Dc)
     $sam = Get-GraphVal $Object 'onPremisesSamAccountName'
     if ($sam) {
-        $g = Get-ADGroup -Filter "sAMAccountName -eq '$sam'" -Server $Dc -ErrorAction SilentlyContinue
+        $g = Get-ADGroup -Filter "sAMAccountName -eq '$(Protect-AdFilterValue $sam)'" -Server $Dc -ErrorAction SilentlyContinue
         if ($g) { return $g }
     }
     $sid = Get-GraphVal $Object 'onPremisesSecurityIdentifier'
@@ -112,11 +122,14 @@ function Get-AdGroupForCloudObject {
 }
 
 function Resolve-AdUserFromPerson {
-    <# Resolve a picked directory person (@{Id;DisplayName;Detail}) to an AD user via its UPN. $null if not found. #>
+    <# Resolve a picked/loaded directory person to an AD user via its UPN. Person objects come in TWO
+       shapes: the person picker uses the 'Detail' key, while Get-UserManagerInfo uses 'Upn' -- accept
+       either (otherwise a loaded manager never resolves on-prem). $null if not found. #>
     param($Person, [string]$Dc)
     $upn = [string]$Person.Detail
+    if (-not $upn) { $upn = [string]$Person.Upn }
     if ($upn -and $upn -match '^[^@\s]+@[^@\s]+$') {
-        $u = Get-ADUser -Filter "userPrincipalName -eq '$upn'" -Server $Dc -ErrorAction SilentlyContinue
+        $u = Get-ADUser -Filter "userPrincipalName -eq '$(Protect-AdFilterValue $upn)'" -Server $Dc -ErrorAction SilentlyContinue
         if ($u) { return $u }
     }
     return $null
@@ -251,17 +264,21 @@ function Sync-AdGroupMembership {
     param($AdGroup, [string]$Dc, [object[]]$Now, [object[]]$Original)
     $nowIds  = @($Now      | ForEach-Object { $_.Id })
     $origIds = @($Original | ForEach-Object { $_.Id })
-    $unresolved = New-Object System.Collections.Generic.List[string]
+    # Collect-and-continue: a single failed add/remove must NOT abort the rest (and lose the warnings
+    # gathered so far) -- it would leave the group half-updated with no report.
+    $warnings = New-Object System.Collections.Generic.List[string]
 
     foreach ($p in $Now)      { if ($origIds -notcontains $p.Id) {
         $ad = Resolve-AdUserFromPerson -Person $p -Dc $Dc
-        if ($ad) { Add-ADGroupMember -Identity $AdGroup -Members $ad -Server $Dc -Confirm:$false -ErrorAction Stop }
-        else { [void]$unresolved.Add([string]$p.DisplayName) }
+        if (-not $ad) { [void]$warnings.Add("Member '$($p.DisplayName)' wasn't found in AD by UPN; not added."); continue }
+        try { Add-ADGroupMember -Identity $AdGroup -Members $ad -Server $Dc -Confirm:$false -ErrorAction Stop }
+        catch { [void]$warnings.Add("Add of '$($p.DisplayName)' failed: $($_.Exception.Message)") }
     } }
     foreach ($p in $Original) { if ($nowIds -notcontains $p.Id) {
         $ad = Resolve-AdUserFromPerson -Person $p -Dc $Dc
-        if ($ad) { Remove-ADGroupMember -Identity $AdGroup -Members $ad -Server $Dc -Confirm:$false -ErrorAction Stop }
-        else { [void]$unresolved.Add([string]$p.DisplayName) }
+        if (-not $ad) { [void]$warnings.Add("Member '$($p.DisplayName)' wasn't found in AD by UPN; not removed."); continue }
+        try { Remove-ADGroupMember -Identity $AdGroup -Members $ad -Server $Dc -Confirm:$false -ErrorAction Stop }
+        catch { [void]$warnings.Add("Remove of '$($p.DisplayName)' failed: $($_.Exception.Message)") }
     } }
-    return @{ Unresolved = $unresolved.ToArray() }
+    return @{ Warnings = $warnings.ToArray() }
 }

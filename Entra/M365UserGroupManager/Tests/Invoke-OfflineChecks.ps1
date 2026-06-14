@@ -96,6 +96,24 @@ Assert-That 'no .GetNewClosure() block calls a module fn or touches $script: (PS
     if ($closureViolations.Count) { $closureViolations | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow } }
     $closureViolations.Count -eq 0
 }
+# Category-1 binder trap guard: wrapping a List-of-hashtables in the array-subexpression operator
+# throws on BOTH 5.1 AND 7 (Add-PeopleToGroup shipped this once; the closure lint above only covers
+# the GetNewClosure trap). Strip comments first so documentation mentioning the idiom doesn't trip it.
+Assert-That 'no source wraps a .People / .OriginalPeople list in the array-subexpression operator (5.1+7 binder crash idiom)' {
+    $hits = foreach ($f in $srcFiles) {
+        $code = (Get-Content -LiteralPath $f.FullName -Raw) -replace '(?s)<#.*?#>', ''
+        $code = (($code -split "`n") | ForEach-Object { $_ -replace '#.*$', '' }) -join "`n"
+        if ($code -match '@\(\s*\$[A-Za-z_][\w\.]*\.(People|OriginalPeople)\s*\)') { $f.Name }
+    }
+    if ($hits) { $hits | ForEach-Object { Write-Host "        array-wrapped People list in $_" -ForegroundColor Yellow } }
+    -not $hits
+}
+Assert-That 'iterating a List[object] of hashtables works without the array operator (the safe Add-PeopleToGroup pattern)' {
+    $l = New-Object System.Collections.Generic.List[object]
+    [void]$l.Add(@{ Id = '1'; DisplayName = 'A' }); [void]$l.Add(@{ Id = '2'; DisplayName = 'B' })
+    $n = 0; foreach ($p in $l) { $n++ }
+    $n -eq 2
+}
 
 Write-Host "`n== Import module ==" -ForegroundColor Cyan
 $manifest = Join-Path $ModuleRoot 'M365UserGroupManager.psd1'
@@ -198,6 +216,9 @@ Assert-That 'ConvertTo-AdAttributeWrites: Replace/Clear/Unsupported + multi-firs
         ($w.Replace['title'] -eq 'Analyst') -and ($w.Replace['telephoneNumber'] -eq '+1 555 0100') -and
         ($w.Clear -contains 'department') -and ($w.Unsupported -contains 'otherMails')
     }
+}
+Assert-That 'Protect-AdFilterValue doubles single quotes (AD -Filter injection guard)' {
+    & $mod { (Protect-AdFilterValue "o'brien") -eq "o''brien" -and (Protect-AdFilterValue 'plain') -eq 'plain' -and (Protect-AdFilterValue $null) -eq '' }
 }
 Assert-That 'every on-prem-mastered user scalar field maps to AD (only otherMails unsupported)' {
     & $mod {

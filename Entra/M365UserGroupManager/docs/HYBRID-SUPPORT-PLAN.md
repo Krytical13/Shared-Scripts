@@ -206,6 +206,31 @@ The field factory (`UiFieldFactory.ps1`) gains an SOA-aware editable/read-only d
   points at a mailbox that lives in EXO. The existing Exchange tab must **check the object's mastering** before
   assuming Exchange Online is authoritative; for a synced recipient, identity attributes still flow from AD.
 
+### This environment's actual P4 need (clarified 2026-06-14)
+All mailboxes live in Exchange Online; on-prem Exchange is used **only** to manage certain **on-prem-sourced
+distribution lists** (their attributes/membership) that still master on-prem. The concrete ask is narrow:
+- **`Enable-RemoteMailbox`** for a user who was never mail-enabled on-prem, so they become a mail-enabled AD
+  recipient and can be **added to an on-prem-sourced DL** (on-prem DL membership requires mail-enabled members).
+- Managing those on-prem DLs' attributes/membership (already largely covered by the P1 synced-group path; for a
+  *mail-enabled* DL, prefer `Add-DistributionGroupMember` over raw `Add-ADGroupMember` so Exchange validates the
+  member is mail-enabled).
+
+**Dependency note:** `Enable-RemoteMailbox` (and `Set-/Add-DistributionGroupMember`) are normally **on-prem
+Exchange Management Shell** cmdlets — NOT the EXO module and NOT the AD module — which would mean a *third*
+system to find/connect to (Exchange tools or a reachable Exchange server) on top of the DC and the Connect Sync
+server.
+
+**DECISION (2026-06-14): no third system.** To keep the tool generic and avoid another thing that can
+break/not-exist, P4 is **either done purely through the existing AD connection or left out** — no on-prem
+Exchange connection layer. That means, if built, P4 mail-enables a user by writing the remote-mailbox AD
+attributes directly (`msExchRemoteRecipientType`, `targetAddress` = `alias@<tenant>.mail.onmicrosoft.com`,
+`mailNickname`, `proxyAddresses`, `msExchRecipientDisplayType` / `msExchRecipientTypeDetails`) via the same
+`OnPremAd.ps1` layer, and adds the user to an on-prem DL via `Add-ADGroupMember`. Trade-off: the attribute
+recipe is **Exchange-version-sensitive** and unsupported-by-MS vs. `Enable-RemoteMailbox`, so it needs validating
+against their org's expected values — if that proves brittle, **P4 is dropped** rather than adding an Exchange
+dependency. (`Add-ADGroupMember` skips Exchange's mail-enabled-member validation, so the member must already be
+mail-enabled — which is exactly what the attribute-write step ensures.)
+
 ---
 
 ## 10. Phased rollout (MVP-first)
@@ -219,7 +244,10 @@ The field factory (`UiFieldFactory.ps1`) gains an SOA-aware editable/read-only d
   and poll-for-landed so edits "appear" promptly.
 - **Phase 3 — SOA converter:** GA **group** conversion first; user/contact behind a Preview flag; full
   guardrails + two-phase UX.
-- **Phase 4 — Hybrid Exchange:** remote-mailbox / on-prem-mastered DL awareness in the Exchange tab.
+- **Phase 4 — mail-enable for on-prem DLs (AD-only, or dropped):** via the *existing* AD connection only — write
+  the remote-mailbox AD attributes directly to mail-enable a synced user, then `Add-ADGroupMember` to an on-prem
+  DL. **No on-prem Exchange connection layer** (decision 2026-06-14: don't add a third system). If the direct-
+  attribute recipe proves too version-sensitive to be reliable, P4 is dropped. See §9.
 
 Each phase is independently shippable and useful; you can stop after any of them.
 

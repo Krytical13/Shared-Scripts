@@ -14,7 +14,8 @@
     #    Input       Control to render. One of:
     #                  Text       single-line TextBox
     #                  Multi      multi-line TextBox, one value per line (string collection)
-    #                  Bool       CheckBox (tri-state in Edit mode so "unchanged" != false)
+    #                  Bool       CheckBox (two-state; the dirty-diff baseline handles "unchanged" so an
+    #                             untouched box is simply not sent on Edit)
     #                  Choice     ComboBox (DropDownList). Values from Choices or ChoiceSource.
     #                  Date       DateTimePicker with a "set?" checkbox (nullable)
     #                  Person     search-and-pick picker (see Multi / TargetType)
@@ -145,7 +146,7 @@
                 @{ Name = 'displayName';  Label = 'Display Name';    Input = 'Text';      Writable = $true;  Required = $true;  DefaultShow = $true;  MaxLength = 256 }
                 @{ Name = 'mailNickname'; Label = 'Mail Nickname';   Input = 'Text';      Writable = $true;  Required = $true;  DefaultShow = $true;  MaxLength = 64; Help = 'no spaces; ASCII only' }
                 @{ Name = 'description';  Label = 'Description';     Input = 'Multi';     Writable = $true;  Required = $false; DefaultShow = $true }
-                @{ Name = 'visibility';   Label = 'Visibility';      Input = 'Choice';    Writable = $true;  Required = $false; DefaultShow = $false; Choices = @('Public', 'Private'); Help = 'Microsoft 365 groups only' }
+                @{ Name = 'visibility';   Label = 'Visibility';      Input = 'Choice';    Writable = $true;  Required = $false; DefaultShow = $false; Authority = 'Cloud'; Choices = @('Public', 'Private'); Help = 'Microsoft 365 groups only (cloud concept; has no on-prem AD equivalent)' }
                 @{ Name = 'id';           Label = 'Object ID';       Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $false }
                 @{ Name = 'mail';         Label = 'Email';           Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $true }
                 @{ Name = 'groupTypes';   Label = 'Group Types';     Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $false }
