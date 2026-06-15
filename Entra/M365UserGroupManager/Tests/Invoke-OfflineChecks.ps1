@@ -303,6 +303,22 @@ Assert-That 'new-user required model: First/Last marked required; display/alias/
         (-not $b['accountEnabled'].Required)
     }
 }
+Assert-That 'New-user form is CURATED: essentials shown, profile extras hidden until Edit' {
+    & $mod {
+        $newSet = @(Get-CatalogAttributeList -Tab 'User' | Where-Object { $_.ShowOnNew -or $_.Required -or $_.RequiredForCreate } | ForEach-Object { $_.Name })
+        $haveEssentials = @('givenName', 'surname', 'displayName', 'userPrincipalName', 'passwordProfile', 'accountEnabled', 'usageLocation', 'jobTitle', 'department', 'manager', 'assignedLicenses') | Where-Object { $newSet -notcontains $_ }
+        $haveExtras = @('employeeId', 'streetAddress', 'extensionAttribute1', 'mobilePhone', 'otherMails', 'userType', 'companyName') | Where-Object { $newSet -contains $_ }
+        (-not $haveEssentials) -and (-not $haveExtras)
+    }
+}
+Assert-That 'New-group form shows type/name/description/members/owners, not read-only fields' {
+    & $mod {
+        $newSet = @(Get-CatalogAttributeList -Tab 'Group' | Where-Object { $_.ShowOnNew -or $_.Required -or $_.RequiredForCreate } | ForEach-Object { $_.Name })
+        ($newSet -contains '__groupType') -and ($newSet -contains 'displayName') -and ($newSet -contains 'mailNickname') -and
+        ($newSet -contains 'description') -and ($newSet -contains 'members') -and ($newSet -contains 'owners') -and
+        ($newSet -notcontains 'id') -and ($newSet -notcontains 'groupTypes')
+    }
+}
 
 # Exchange catalog attributes also build controls.
 & $mod {

@@ -30,7 +30,11 @@
     #    RequiredForCreate  like Required for submit validation (must be non-empty to create), but NOT
     #                marked with * because it auto-generates from the name (displayName/alias/UPN).
     #                Such fields are also always shown when creating, regardless of Settings.
-    #    DefaultShow $true to enable the field by default (until the user changes Settings).
+    #    ShowOnNew   $true to include this field in the curated NEW (create) form. New mode shows the
+    #                ShowOnNew set PLUS all Required/RequiredForCreate fields -- a focused create form
+    #                (e.g. a new hire). EDIT mode instead shows the Settings-enabled set, so you create
+    #                with the essentials and then complete the rest after the auto-switch to Edit.
+    #    DefaultShow $true to enable the field by default in the EDIT view (until the user changes Settings).
     #    Choices     literal value list for Input=Choice.
     #    ChoiceSource named dynamic list for Input=Choice: 'Country' (ISO 3166-1 alpha-2).
     #    Multi       Input=Person: $true = pick many, $false = pick one.
@@ -68,18 +72,18 @@
         @{
             Name = 'Account'
             Attributes = @(
-                @{ Name = 'accountEnabled'; Label = 'Account Enabled';        Input = 'Bool';     Writable = $true; Required = $false; DefaultShow = $true; Help = 'defaults to enabled; uncheck to create a disabled account' }
+                @{ Name = 'accountEnabled'; Label = 'Account Enabled';        Input = 'Bool';     Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true; Help = 'defaults to enabled; uncheck to create a disabled account' }
                 @{ Name = 'passwordProfile';Label = 'Password';               Input = 'Password'; Writable = $true; Required = $true;  DefaultShow = $true;  Help = 'for a synced user the reset is applied on-premises in AD; cloud-only users reset in the cloud (Authority defaults to OnPrem)' }
-                @{ Name = 'usageLocation';  Label = 'Usage Location';         Input = 'Choice';   Writable = $true; Required = $false; DefaultShow = $true;  Authority = 'Cloud'; ChoiceSource = 'Country'; Help = 'two-letter country code; required before assigning a license (cloud property)' }
+                @{ Name = 'usageLocation';  Label = 'Usage Location';         Input = 'Choice';   Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true;  Authority = 'Cloud'; ChoiceSource = 'Country'; Help = 'two-letter country code; required before assigning a license (cloud property)' }
                 @{ Name = 'userType';       Label = 'User Type';              Input = 'Choice';   Writable = $true; Required = $false; DefaultShow = $false; Authority = 'Cloud'; Choices = @('Member', 'Guest') }
             )
         }
         @{
             Name = 'Job & Organization'
             Attributes = @(
-                @{ Name = 'jobTitle';         Label = 'Job Title';        Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $true }
-                @{ Name = 'department';       Label = 'Department';       Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $true }
-                @{ Name = 'manager';          Label = 'Manager';          Input = 'Person'; Writable = $true; Required = $false; DefaultShow = $true;  Multi = $false; TargetType = 'User' }
+                @{ Name = 'jobTitle';         Label = 'Job Title';        Input = 'Text';   Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true }
+                @{ Name = 'department';       Label = 'Department';       Input = 'Text';   Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true }
+                @{ Name = 'manager';          Label = 'Manager';          Input = 'Person'; Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true;  Multi = $false; TargetType = 'User' }
                 @{ Name = 'companyName';      Label = 'Company Name';     Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $false }
                 @{ Name = 'employeeId';       Label = 'Employee ID';      Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $false }
                 @{ Name = 'employeeType';     Label = 'Employee Type';    Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $false }
@@ -109,7 +113,7 @@
         @{
             Name = 'Licensing'
             Attributes = @(
-                @{ Name = 'assignedLicenses'; Label = 'Licenses'; Input = 'License'; Writable = $true; Required = $false; DefaultShow = $false; Authority = 'Cloud'; Help = 'usage location must be set first. License assignment is always a cloud operation, even for synced users' }
+                @{ Name = 'assignedLicenses'; Label = 'Licenses'; Input = 'License'; Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $false; Authority = 'Cloud'; Help = 'usage location must be set first. License assignment is always a cloud operation, even for synced users' }
             )
         }
         @{
@@ -149,8 +153,8 @@
                 @{ Name = '__groupType';  Label = 'Group Type';      Input = 'GroupType'; Writable = $true;  Required = $true;  DefaultShow = $true;  Authority = 'Cloud'; Help = 'Security or Microsoft 365; create-time only (the tool only creates cloud groups); cannot be changed after creation' }
                 @{ Name = 'displayName';  Label = 'Display Name';    Input = 'Text';      Writable = $true;  Required = $true;  DefaultShow = $true;  MaxLength = 256 }
                 @{ Name = 'mailNickname'; Label = 'Mail Nickname';   Input = 'Text';      Writable = $true;  Required = $true;  DefaultShow = $true;  MaxLength = 64; Help = 'no spaces; ASCII only' }
-                @{ Name = 'description';  Label = 'Description';     Input = 'Multi';     Writable = $true;  Required = $false; DefaultShow = $true }
-                @{ Name = 'visibility';   Label = 'Visibility';      Input = 'Choice';    Writable = $true;  Required = $false; DefaultShow = $false; Authority = 'Cloud'; Choices = @('Public', 'Private'); Help = 'Microsoft 365 groups only (cloud concept; has no on-prem AD equivalent)' }
+                @{ Name = 'description';  Label = 'Description';     Input = 'Multi';     Writable = $true;  Required = $false; ShowOnNew = $true; DefaultShow = $true }
+                @{ Name = 'visibility';   Label = 'Visibility';      Input = 'Choice';    Writable = $true;  Required = $false; ShowOnNew = $true; DefaultShow = $false; Authority = 'Cloud'; Choices = @('Public', 'Private'); Help = 'Microsoft 365 groups only (cloud concept; has no on-prem AD equivalent)' }
                 @{ Name = 'id';           Label = 'Object ID';       Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $false }
                 @{ Name = 'mail';         Label = 'Email';           Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $true }
                 @{ Name = 'groupTypes';   Label = 'Group Types';     Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $false }
@@ -159,8 +163,8 @@
         @{
             Name = 'Membership'
             Attributes = @(
-                @{ Name = 'members'; Label = 'Members'; Input = 'Person'; Writable = $true; Required = $false; DefaultShow = $true; Multi = $true; TargetType = 'Any' }
-                @{ Name = 'owners';  Label = 'Owners';  Input = 'Person'; Writable = $true; Required = $false; DefaultShow = $true; Multi = $true; TargetType = 'User' }
+                @{ Name = 'members'; Label = 'Members'; Input = 'Person'; Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true; Multi = $true; TargetType = 'Any' }
+                @{ Name = 'owners';  Label = 'Owners';  Input = 'Person'; Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true; Multi = $true; TargetType = 'User' }
             )
         }
     )

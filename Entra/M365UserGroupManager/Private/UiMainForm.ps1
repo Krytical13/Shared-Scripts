@@ -228,9 +228,13 @@ function Build-TabForm {
         # Show every enabled attribute (incl. ReadOnly) so the Settings checkboxes are truthful --
         # checked = shown. ReadOnly fields render empty/greyed on a New object (value appears once
         # it exists); they are simply not editable.
-        # Fields required to create (marked * or auto-generated) are ALWAYS shown when creating, even
-        # if unchecked in Settings -- the object can't be created without them.
-        $attrs = @($group.Attributes | Where-Object { ($enabled -contains $_.Name) -or ($ctx.Mode -eq 'New' -and ($_.Required -or $_.RequiredForCreate)) })
+        # New (create) mode shows a CURATED set -- the ShowOnNew fields plus everything required to
+        # create -- so the new-hire form stays focused. Edit mode shows the Settings-enabled set
+        # (you complete the rest after the auto-switch to Edit on create).
+        $attrs = @($group.Attributes | Where-Object {
+                if ($ctx.Mode -eq 'New') { $_.ShowOnNew -or $_.Required -or $_.RequiredForCreate }
+                else { $enabled -contains $_.Name }
+            })
         if ($attrs.Count -eq 0) { continue }
         [void]$plan.Add(@{ Header = $group.Name })
         foreach ($a in $attrs) { [void]$plan.Add(@{ Attr = $a }) }
