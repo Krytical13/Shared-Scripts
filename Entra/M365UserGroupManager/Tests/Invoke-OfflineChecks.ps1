@@ -386,6 +386,19 @@ Assert-That 'guest invite wired: User.Invite.All scope + Send-GuestInvitation pr
         ($script:GraphScopes -contains 'User.Invite.All') -and [bool](Get-Command Send-GuestInvitation -ErrorAction SilentlyContinue)
     }
 }
+Assert-That 'New/Edit and Member/Guest are INDEPENDENT radio groups (Guest does not deselect New)' {
+    & $mod {
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $form = New-MainForm
+        $u = $script:UI.User
+        $u.TypeGuest.Checked = $true
+        $ok = ($u.ModeNew.Checked) -and ($u.TypeGuest.Checked) -and (-not $u.ModeEdit.Checked) -and (-not $u.TypeMember.Checked)
+        # and the panel really is a separate parent (not $left), so grouping is independent
+        $sep = ($u.TypeMember.Parent -ne $u.ModeNew.Parent)
+        $form.Dispose()
+        $ok -and $sep
+    }
+}
 
 # Text field read / set / dirty.
 $dirtyResult = & $mod {

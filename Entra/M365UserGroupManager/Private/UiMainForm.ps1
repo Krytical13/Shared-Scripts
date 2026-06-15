@@ -124,18 +124,23 @@ function New-EntityTab {
     $left.Dock = 'Fill'; $left.FlowDirection = 'LeftToRight'; $left.WrapContents = $false
     $modeNew = New-Object System.Windows.Forms.RadioButton; $modeNew.Text = "&New $entityWord"; $modeNew.AutoSize = $true; $modeNew.Checked = $true; $modeNew.Margin = New-Object System.Windows.Forms.Padding(3, 10, 8, 3)
     $modeEdit = New-Object System.Windows.Forms.RadioButton; $modeEdit.Text = '&Edit existing'; $modeEdit.AutoSize = $true; $modeEdit.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
-    # Account type (User tab only): create a Member, or invite an external Guest. Shown only in New mode.
-    $typeMember = $null; $typeGuest = $null
+    # Account type (User tab only): create a Member, or invite an external Guest. These radios MUST
+    # live in their own container -- WinForms groups radio buttons by their immediate parent, so
+    # putting them in the same panel as New/Edit would make all four one mutually-exclusive group.
+    $typePanel = $null; $typeMember = $null; $typeGuest = $null
     if ($Tab -eq 'User') {
+        $typePanel = New-Object System.Windows.Forms.FlowLayoutPanel
+        $typePanel.AutoSize = $true; $typePanel.AutoSizeMode = 'GrowAndShrink'; $typePanel.FlowDirection = 'LeftToRight'; $typePanel.WrapContents = $false; $typePanel.Margin = New-Object System.Windows.Forms.Padding(0)
         $typeSep = New-Object System.Windows.Forms.Label; $typeSep.Text = '|'; $typeSep.AutoSize = $true; $typeSep.ForeColor = $t.Border; $typeSep.Margin = New-Object System.Windows.Forms.Padding(2, 11, 6, 3)
         $typeMember = New-Object System.Windows.Forms.RadioButton; $typeMember.Text = '&Member'; $typeMember.AutoSize = $true; $typeMember.Checked = $true; $typeMember.Margin = New-Object System.Windows.Forms.Padding(3, 10, 6, 3)
         $typeGuest = New-Object System.Windows.Forms.RadioButton; $typeGuest.Text = '&Guest (invite)'; $typeGuest.AutoSize = $true; $typeGuest.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
+        $typePanel.Controls.AddRange(@($typeSep, $typeMember, $typeGuest))
     }
     $selectBtn = New-Object System.Windows.Forms.Button; $selectBtn.Text = "&Select $entityWord..."; $selectBtn.Width = 130; $selectBtn.Height = 26; $selectBtn.Visible = $false; $selectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 3)
     Set-SecondaryButtonStyle $selectBtn
     $targetLabel = New-Object System.Windows.Forms.Label; $targetLabel.AutoSize = $true; $targetLabel.Margin = New-Object System.Windows.Forms.Padding(3, 11, 3, 3); $targetLabel.ForeColor = $t.Muted; $targetLabel.Visible = $false
     if ($Tab -eq 'User') {
-        $left.Controls.AddRange(@($modeNew, $modeEdit, $typeSep, $typeMember, $typeGuest, $selectBtn, $targetLabel))
+        $left.Controls.AddRange(@($modeNew, $modeEdit, $typePanel, $selectBtn, $targetLabel))
     } else {
         $left.Controls.AddRange(@($modeNew, $modeEdit, $selectBtn, $targetLabel))
     }
@@ -215,7 +220,7 @@ function New-EntityTab {
         Fields = @{}; Order = (New-Object System.Collections.Generic.List[object])
         SaveBtn = $saveBtn; ResetBtn = $resetBtn; DeleteBtn = $deleteBtn; SettingsBtn = $settingsBtn
         BackupBtn = $backupBtn; RestoreBtn = $restoreBtn
-        TypeMember = $typeMember; TypeGuest = $typeGuest
+        TypePanel = $typePanel; TypeMember = $typeMember; TypeGuest = $typeGuest
         GuestBox = $guestBox; GuestEmail = $gEmail; GuestName = $gName; GuestSend = $gSend; GuestUrl = $gUrl
     }
 
@@ -407,9 +412,8 @@ function Set-TabMode {
     if ($Tab -eq 'User') { $script:State.SelectedUser = $null } else { $script:State.SelectedGroup = $null }
     # Member/Guest toggle only applies to creating a User; show it in New mode, and always return to
     # the Member view on a mode switch.
-    if ($Tab -eq 'User' -and $ctx.TypeMember) {
-        $ctx.TypeMember.Visible = ($Mode -eq 'New')
-        $ctx.TypeGuest.Visible = ($Mode -eq 'New')
+    if ($Tab -eq 'User' -and $ctx.TypePanel) {
+        $ctx.TypePanel.Visible = ($Mode -eq 'New')
         $ctx.TypeMember.Checked = $true
         Set-UserAccountType -Type 'Member'
     }
