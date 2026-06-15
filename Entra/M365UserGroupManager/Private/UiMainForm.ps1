@@ -89,6 +89,10 @@ function New-MainForm {
     $connectBtn.Add_Click({ Invoke-Account })
     $disconnectBtn.Add_Click({ Invoke-Disconnect })
 
+    # On open, let the user choose which saved account to connect to (when more than one) instead of
+    # silently adopting the last/persisted session. Plain scriptblock keeps module affinity.
+    $form.Add_Shown({ Invoke-StartupConnect })
+
     return $form
 }
 
@@ -224,7 +228,9 @@ function Build-TabForm {
         # Show every enabled attribute (incl. ReadOnly) so the Settings checkboxes are truthful --
         # checked = shown. ReadOnly fields render empty/greyed on a New object (value appears once
         # it exists); they are simply not editable.
-        $attrs = @($group.Attributes | Where-Object { $enabled -contains $_.Name })
+        # Required fields are ALWAYS shown when creating (and marked with *), even if unchecked in
+        # Settings -- the object can't be created without them.
+        $attrs = @($group.Attributes | Where-Object { ($enabled -contains $_.Name) -or ($ctx.Mode -eq 'New' -and $_.Required) })
         if ($attrs.Count -eq 0) { continue }
         [void]$plan.Add(@{ Header = $group.Name })
         foreach ($a in $attrs) { [void]$plan.Add(@{ Attr = $a }) }
@@ -371,6 +377,11 @@ function Connect-NewAccount {
     Set-UiBusy $true
     try {
         Disconnect-ExoSafe   # any Exchange session belonged to the previous account
+        # "Sign in new" must show an account chooser. If we're already connected, a valid cached
+        # token makes Connect-MgGraph silently reuse the CURRENT account (so the dialog appeared to do
+        # nothing). Disconnect first to clear the context and force a fresh interactive sign-in where
+        # the user can pick/add a different account.
+        if (Test-GraphConnected) { Disconnect-GraphSafe }
         Set-Progress 'Opening sign-in...'
         $ctx = Connect-Tenant
         if ($ctx) { Complete-Connection -Context $ctx }
@@ -380,6 +391,18 @@ function Connect-NewAccount {
     } finally {
         Set-UiBusy $false
     }
+}
+
+function Invoke-StartupConnect {
+    <#
+        Runs once when the window first shows. If MORE THAN ONE account is saved, present the picker
+        so the user chooses which to connect to (rather than silently adopting the last/persisted
+        session). With 0 or 1 saved account we do nothing: the label already reflects any persisted
+        session and NO network call is made until the user acts -- so launching off-VPN/off-network
+        is safe, and a lone remembered account is simply reused.
+    #>
+    if (-not $script:AppReady) { return }
+    if (@($script:Config.Accounts).Count -ge 2) { Invoke-Account }
 }
 
 function Invoke-Account {

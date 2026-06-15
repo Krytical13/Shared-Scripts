@@ -69,12 +69,15 @@ Describe 'Field factory: read / prefill / dirty' {
         }
     }
 
-    It 'uppercases a country code from an editable Choice' {
+    It 'usage location shows full country names but stores the 2-letter code' {
         InModuleScope M365UserGroupManager {
             $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
             $f = New-FieldRow -Attr @{ Name = 'usageLocation'; Label = 'Usage'; Input = 'Choice'; ChoiceSource = 'Country'; Writable = $true } -Mode 'New' -Tlp $tlp -Tooltip (New-Object System.Windows.Forms.ToolTip)
-            Set-FieldValue -Field $f -Value 'gb'
-            (Read-FieldValue $f) | Should -Be 'GB'
+            $us = $f.Main.Items | Where-Object { $_.Code -eq 'US' }
+            $us | Should -Not -BeNullOrEmpty
+            $us.Display | Should -Match 'United States'        # full name displayed, not just 'US'
+            Set-FieldValue -Field $f -Value 'gb'               # set by code (any case)
+            (Read-FieldValue $f) | Should -Be 'GB'             # stored/sent value is the 2-letter code
         }
     }
 
@@ -158,14 +161,14 @@ Describe 'Field factory: validation' {
         }
     }
 
-    It 'requires a 2-letter usage location when provided' {
+    It 'usage location can only hold a valid country (closed dropdown), so it always validates' {
         InModuleScope M365UserGroupManager {
             $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
             $f = New-FieldRow -Attr @{ Name = 'usageLocation'; Label = 'Usage'; Input = 'Choice'; ChoiceSource = 'Country'; Writable = $true } -Mode 'New' -Tlp $tlp -Tooltip (New-Object System.Windows.Forms.ToolTip)
-            $f.Main.Text = 'USA'
-            (Get-FieldValidationError -Field $f) | Should -Not -BeNullOrEmpty
-            $f.Main.Text = 'US'
-            (Get-FieldValidationError -Field $f) | Should -BeNullOrEmpty
+            (Get-FieldValidationError -Field $f) | Should -BeNullOrEmpty   # empty default is allowed (not required)
+            Set-FieldValue -Field $f -Value 'US'
+            (Read-FieldValue $f) | Should -Be 'US'
+            (Get-FieldValidationError -Field $f) | Should -BeNullOrEmpty   # a selected country is always a valid 2-letter code
         }
     }
 

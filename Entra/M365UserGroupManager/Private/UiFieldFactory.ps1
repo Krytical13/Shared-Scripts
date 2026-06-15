@@ -46,6 +46,20 @@ function Get-IsoCountryCode {
     )
 }
 
+function Get-IsoCountry {
+    <#
+        ISO 3166-1 alpha-2 codes paired with their English country name (via .NET RegionInfo, so no
+        249-row hardcoded table to maintain). Used to show full names in the Usage Location dropdown
+        while still storing/sending the 2-letter code. Codes with no RegionInfo (e.g. AQ) fall back
+        to the code as the name.
+    #>
+    foreach ($code in (Get-IsoCountryCode)) {
+        $name = $code
+        try { $name = ([System.Globalization.RegionInfo]$code).EnglishName } catch { }
+        [pscustomobject]@{ Code = $code; Name = $name }
+    }
+}
+
 function New-RandomPassword {
     param([int]$Length = 16)
     $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; $lower = 'abcdefghijkmnpqrstuvwxyz'
@@ -103,11 +117,12 @@ function New-FieldRow {
     $t = Get-Theme
 
     $label = New-Object System.Windows.Forms.Label
-    $label.Text = $Attr.Label + ':'
+    $isRequiredNew = ($Attr.Required -and $Mode -eq 'New')
+    $label.Text = $Attr.Label + $(if ($isRequiredNew) { ' *' } else { '' }) + ':'
     $label.AutoSize = $true
     $label.Anchor = 'Left'
     $label.Margin = New-Object System.Windows.Forms.Padding(3, 8, 10, 3)
-    if ($Attr.Required -and $Mode -eq 'New') { $label.Font = $t.FontBold }
+    if ($isRequiredNew) { $label.Font = $t.FontBold }   # bold + '*' marks a field required to create
 
     $field = @{
         Attr = $Attr; Mode = $Mode; Kind = $Attr.Input
@@ -161,11 +176,16 @@ function New-FieldRow {
             $cmb.Width = 220; $cmb.Anchor = 'Left'
             $cmb.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 4)
             if ($Attr.ChoiceSource -eq 'Country') {
-                $cmb.DropDownStyle = 'DropDown'        # editable: accept any valid 2-letter code
-                $cmb.AutoCompleteMode = 'SuggestAppend'
-                $cmb.AutoCompleteSource = 'ListItems'
-                $cmb.MaxLength = 2
-                foreach ($c in (Get-IsoCountryCode)) { [void]$cmb.Items.Add($c) }
+                # Show the full country name (sorted) but carry the 2-letter ISO code as the value.
+                # DropDownList: type-ahead jumps to a country; the stored value is SelectedItem.Code.
+                $cmb.DropDownStyle = 'DropDownList'
+                $cmb.Width = 320; $cmb.DropDownWidth = 320
+                $cmb.DisplayMember = 'Display'
+                [void]$cmb.Items.Add([pscustomobject]@{ Display = ''; Code = '' })   # explicit "no value"
+                foreach ($c in (Get-IsoCountry | Sort-Object Name)) {
+                    [void]$cmb.Items.Add([pscustomobject]@{ Display = "$($c.Name) ($($c.Code))"; Code = $c.Code })
+                }
+                $cmb.SelectedIndex = 0
             } else {
                 $cmb.DropDownStyle = 'DropDownList'    # closed set: pick-only
                 [void]$cmb.Items.Add('')               # explicit "no value"
@@ -332,7 +352,10 @@ function Read-FieldValue {
         'Multi'  { return (ConvertTo-StringList $Field.Main.Lines) }
         'Bool'   { return [bool]$Field.Main.Checked }
         'Choice' {
-            if ($Field.Attr.ChoiceSource -eq 'Country') { return $Field.Main.Text.Trim().ToUpper() }
+            if ($Field.Attr.ChoiceSource -eq 'Country') {
+                $sel = $Field.Main.SelectedItem
+                if ($sel -and $sel.Code) { return [string]$sel.Code } else { return '' }
+            }
             return [string]$Field.Main.SelectedItem
         }
         'Date'   { if ($Field.Main.Checked) { return $Field.Main.Value.Date } else { return $null } }
@@ -378,7 +401,9 @@ function Set-FieldValue {
         'Choice' {
             $sv = [string]$Value
             if ($Field.Attr.ChoiceSource -eq 'Country') {
-                $Field.Main.Text = $sv
+                $match = $null
+                foreach ($it in $Field.Main.Items) { if ($it.Code -eq $sv) { $match = $it; break } }
+                if ($match) { $Field.Main.SelectedItem = $match } else { $Field.Main.SelectedIndex = 0 }
             } elseif ($Field.Main.Items.Contains($sv)) {
                 $Field.Main.SelectedItem = $sv
             } else {

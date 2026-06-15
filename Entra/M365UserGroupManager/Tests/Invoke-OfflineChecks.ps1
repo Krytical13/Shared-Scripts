@@ -271,6 +271,15 @@ Assert-That 'Set-FieldReadOnlyForSync: gated Person keeps list readable, disable
         ($pf.Main.Enabled) -and ($btns.Count -gt 0) -and (-not ($btns | Where-Object { $_.Enabled }))
     }
 }
+Assert-That 'usage location dropdown: full-name items, 2-letter code value round-trip' {
+    & $mod {
+        $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
+        $f = New-FieldRow -Attr @{ Name = 'usageLocation'; Label = 'Usage'; Input = 'Choice'; ChoiceSource = 'Country'; Writable = $true } -Mode 'New' -Tlp $tlp -Tooltip (New-Object System.Windows.Forms.ToolTip)
+        $us = $f.Main.Items | Where-Object { $_.Code -eq 'US' }
+        Set-FieldValue -Field $f -Value 'gb'
+        ($us -and ($us.Display -match 'United States')) -and ((Read-FieldValue $f) -eq 'GB')
+    }
+}
 
 # Exchange catalog attributes also build controls.
 & $mod {

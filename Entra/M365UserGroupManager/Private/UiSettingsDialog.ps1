@@ -61,8 +61,14 @@ function Show-SettingsDialog {
         $inner.Margin = New-Object System.Windows.Forms.Padding(3, 16, 3, 3)
         foreach ($attr in $group.Attributes) {
             $cb = New-Object System.Windows.Forms.CheckBox
-            $cb.Text = $attr.Label; $cb.AutoSize = $true; $cb.Tag = $attr
-            $cb.Checked = ($enabled -contains $attr.Name)
+            $cb.AutoSize = $true; $cb.Tag = $attr
+            if ($attr.Required) {
+                # Required-to-create fields are always shown (and marked *) -- lock them on here so
+                # the Settings list reflects that and they can't be unchecked.
+                $cb.Text = $attr.Label + '  (required)'; $cb.Checked = $true; $cb.Enabled = $false
+            } else {
+                $cb.Text = $attr.Label; $cb.Checked = ($enabled -contains $attr.Name)
+            }
             [void]$inner.Controls.Add($cb)
             [void]$checks.Add($cb)
         }
@@ -70,14 +76,15 @@ function Show-SettingsDialog {
         [void]$flow.Controls.Add($gb)
     }
 
-    $btnAll.Add_Click({ foreach ($c in $checks) { $c.Checked = $true } }.GetNewClosure())
-    $btnNone.Add_Click({ foreach ($c in $checks) { $c.Checked = $false } }.GetNewClosure())
+    # Skip disabled (required) checkboxes -- they stay locked on.
+    $btnAll.Add_Click({ foreach ($c in $checks) { if ($c.Enabled) { $c.Checked = $true } } }.GetNewClosure())
+    $btnNone.Add_Click({ foreach ($c in $checks) { if ($c.Enabled) { $c.Checked = $false } } }.GetNewClosure())
     # Compute the defaults OUTSIDE the handler and capture the RESULT: a .GetNewClosure() block
     # loses module affinity on Windows PowerShell 5.1 and can't call module-private functions
     # (Get-DefaultEnabledNames would throw "not recognized" at click time).
     $defaultNames = Get-DefaultEnabledNames -Tab $Tab
     $btnDef.Add_Click({
-        foreach ($c in $checks) { $c.Checked = ($defaultNames -contains $c.Tag.Name) }
+        foreach ($c in $checks) { if ($c.Enabled) { $c.Checked = ($defaultNames -contains $c.Tag.Name) } }
     }.GetNewClosure())
 
     # --- Bottom: OK / Cancel ---------------------------------------------------------------
