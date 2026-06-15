@@ -1166,9 +1166,9 @@ function Show-PasswordResetDialog {
     $pwd = New-Object System.Windows.Forms.TextBox; $pwd.Location = New-Object System.Drawing.Point(14, 44); $pwd.Size = New-Object System.Drawing.Size(290, 24); $pwd.UseSystemPasswordChar = $true
     $gen = New-Object System.Windows.Forms.Button; $gen.Text = 'Generate'; $gen.Location = New-Object System.Drawing.Point(312, 43); $gen.Size = New-Object System.Drawing.Size(80, 26)
     Set-SecondaryButtonStyle $gen
-    # Plain scriptblock so the handler keeps module affinity and can call New-RandomPassword
+    # Plain scriptblock so the handler keeps module affinity and can call New-Passphrase
     # ($pwd stays in scope because the dialog is modal). A closure would fail on PS 5.1.
-    $gen.Add_Click({ $pwd.UseSystemPasswordChar = $false; $pwd.Text = (New-RandomPassword) })
+    $gen.Add_Click({ $pwd.UseSystemPasswordChar = $false; $pwd.Text = (New-Passphrase) })
     $force = New-Object System.Windows.Forms.CheckBox; $force.Text = 'Force change at next sign-in'; $force.Checked = $true; $force.AutoSize = $true; $force.Location = New-Object System.Drawing.Point(14, 80)
 
     $ok = New-Object System.Windows.Forms.Button; $ok.Text = 'Reset'; $ok.DialogResult = 'OK'; $ok.Location = New-Object System.Drawing.Point(224, 128); $ok.Size = New-Object System.Drawing.Size(80, 28)

@@ -280,6 +280,21 @@ Assert-That 'usage location dropdown: full-name items, 2-letter code value round
         ($us -and ($us.Display -match 'United States')) -and ((Read-FieldValue $f) -eq 'GB')
     }
 }
+Assert-That 'New-Passphrase: has upper+lower+digit+symbol and no symbol runs (e.g. no "__")' {
+    & $mod {
+        $ok = $true
+        foreach ($n in 1..25) {
+            $p = New-Passphrase
+            if ($p -cnotmatch '[A-Z]') { $ok = $false }                 # uppercase (capitalized words)
+            if ($p -cnotmatch '[a-z]') { $ok = $false }                 # lowercase
+            if ($p -notmatch '[0-9]') { $ok = $false }                  # a digit
+            if ($p -notmatch '[!@#$%^&*?+=\-]') { $ok = $false }        # a symbol
+            if ($p -match '[-_!@#$%^&*?+=]{2,}') { $ok = $false }        # NO run of symbols
+            if ($p.Length -lt 10) { $ok = $false }
+        }
+        $ok
+    }
+}
 Assert-That 'UPN field round-trips local@domain' {
     & $mod {
         $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2

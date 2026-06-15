@@ -60,21 +60,53 @@ function Get-IsoCountry {
     }
 }
 
-function New-RandomPassword {
-    param([int]$Length = 16)
-    $upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; $lower = 'abcdefghijkmnpqrstuvwxyz'
-    $digit = '23456789';                $sym   = '!@#$%^&*-_=+'
-    $all = $upper + $lower + $digit + $sym
-    $bytes = New-Object byte[] $Length
-    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-    $chars = for ($i = 0; $i -lt $Length; $i++) { $all[$bytes[$i] % $all.Length] }
-    $sb = (-join $chars).ToCharArray()
-    # Guarantee at least one of each character class.
-    $sb[0] = $upper[$bytes[0] % $upper.Length]
-    $sb[1] = $lower[$bytes[1] % $lower.Length]
-    $sb[2] = $digit[$bytes[2] % $digit.Length]
-    $sb[3] = $sym[$bytes[3] % $sym.Length]
-    return -join $sb
+function Get-RandomIndex {
+    <# Crypto-random integer 0..Count-1. Uses the RNG byte path so it works on BOTH Windows
+       PowerShell 5.1 (.NET Framework) and PowerShell 7 (RandomNumberGenerator.GetInt32 is 7-only). #>
+    param([System.Security.Cryptography.RandomNumberGenerator]$Rng, [int]$Count)
+    $b = New-Object byte[] 4; $Rng.GetBytes($b)
+    return [int]([System.BitConverter]::ToUInt32($b, 0) % $Count)
+}
+
+function Get-PassphraseWordList {
+    <# Simple, distinct, inoffensive words (4-8 letters) for passphrase generation. #>
+    @(
+        'amber', 'anchor', 'arrow', 'autumn', 'basil', 'beacon', 'birch', 'bison', 'bloom', 'branch',
+        'breeze', 'bridge', 'bronze', 'brook', 'canyon', 'cedar', 'cherry', 'cliff', 'clover', 'cobalt',
+        'comet', 'copper', 'coral', 'cotton', 'crane', 'crater', 'creek', 'crystal', 'dawn', 'delta',
+        'desert', 'dune', 'eagle', 'ember', 'falcon', 'fern', 'forest', 'garnet', 'glacier', 'granite',
+        'grove', 'harbor', 'hazel', 'heron', 'hollow', 'ivory', 'jade', 'jasper', 'juniper', 'lagoon',
+        'lantern', 'lemon', 'lily', 'linen', 'lotus', 'maple', 'marble', 'meadow', 'meteor', 'mint',
+        'moss', 'nectar', 'nimbus', 'ocean', 'olive', 'onyx', 'opal', 'orchid', 'otter', 'pebble',
+        'pepper', 'pine', 'plum', 'poppy', 'prairie', 'quartz', 'quill', 'rapid', 'raven', 'reef',
+        'ridge', 'river', 'robin', 'rowan', 'ruby', 'saffron', 'sage', 'salmon', 'sapphire', 'shadow',
+        'sierra', 'silver', 'slate', 'sparrow', 'spruce', 'stone', 'storm', 'stream', 'summit', 'thicket',
+        'thistle', 'tiger', 'timber', 'topaz', 'trail', 'tulip', 'tundra', 'valley', 'velvet', 'violet',
+        'walnut', 'willow', 'winter', 'zephyr'
+    )
+}
+
+function New-Passphrase {
+    <#
+        Generate a readable passphrase: distinct capitalized words joined by '-', then a digit and a
+        symbol -- e.g. "Tiger-Maple-Cloud7!". Guarantees upper + lower + digit + symbol, and (unlike a
+        random string) never produces ugly symbol runs like '__'.
+    #>
+    param([int]$WordCount = 3)
+    $words = Get-PassphraseWordList
+    $specials = '!@#$%^&*?+='.ToCharArray()    # no '_' / '-' so the trailing symbol can't form a run
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $picked = New-Object System.Collections.Generic.List[string]
+    $guard = 0
+    while ($picked.Count -lt $WordCount -and $guard -lt 300) {
+        $guard++
+        $w = $words[(Get-RandomIndex -Rng $rng -Count $words.Count)]
+        $cap = $w.Substring(0, 1).ToUpper() + $w.Substring(1)
+        if (-not $picked.Contains($cap)) { [void]$picked.Add($cap) }
+    }
+    $digit   = [string]((Get-RandomIndex -Rng $rng -Count 8) + 2)   # 2..9 (skip ambiguous 0/1)
+    $special = [string]$specials[(Get-RandomIndex -Rng $rng -Count $specials.Count)]
+    return (($picked -join '-') + $digit + $special)
 }
 
 function Format-PersonLine {
@@ -268,7 +300,7 @@ function New-FieldRow {
                 $cell.Controls.Add($pwd, 0, 0); $cell.Controls.Add($gen, 1, 0)
                 $cell.Controls.Add($force, 0, 1); $cell.SetColumnSpan($force, 2)
                 $gen.Tag = $pwd
-                $gen.Add_Click({ param($s, $e) $box = $s.Tag; $box.UseSystemPasswordChar = $false; $box.Text = (New-RandomPassword) })
+                $gen.Add_Click({ param($s, $e) $box = $s.Tag; $box.UseSystemPasswordChar = $false; $box.Text = (New-Passphrase) })
                 $field.Main = $pwd; $field.Aux = $force; $field.Cell = $cell
             } else {
                 $btn = New-Object System.Windows.Forms.Button

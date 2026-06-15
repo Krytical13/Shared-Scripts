@@ -113,17 +113,30 @@ function Get-TenantDomainHint {
 }
 
 function Initialize-VerifiedDomains {
-    <# Fetch the tenant's verified domains for the UPN domain dropdown. Best-effort; refreshed on
-       each connect/switch (covered by Organization.Read.All). #>
-    $script:VerifiedDomains = @()
+    <# Fetch the tenant's verified domains for the UPN domain dropdown (covered by Organization.Read.All).
+       Falls back to the signed-in account's domain so the dropdown is never blank. Best-effort;
+       refreshed on each connect/switch. #>
+    $list = New-Object System.Collections.Generic.List[object]
     try {
-        $org = Get-MgOrganization -Property 'verifiedDomains' -ErrorAction Stop | Select-Object -First 1
-        $script:VerifiedDomains = @(
-            @(Get-GraphVal $org 'verifiedDomains') | ForEach-Object {
-                if ($_) { @{ Name = [string](Get-GraphVal $_ 'name'); IsDefault = [bool](Get-GraphVal $_ 'isDefault') } }
-            } | Where-Object { $_.Name }
-        )
-    } catch { $script:VerifiedDomains = @() }
+        # NB: fetch the FULL organization object -- selecting just 'verifiedDomains' via -Property has
+        # been seen to return it null on some SDK versions (which left the dropdown blank).
+        $org = Get-MgOrganization -ErrorAction Stop | Select-Object -First 1
+        $vd = $org.VerifiedDomains                                   # typed collection
+        if (-not $vd) { $vd = Get-GraphVal $org 'verifiedDomains' }  # shape-agnostic fallback
+        foreach ($d in $vd) {
+            if (-not $d) { continue }
+            $name = [string](Get-GraphVal $d 'name')
+            if ($name) { [void]$list.Add(@{ Name = $name; IsDefault = [bool](Get-GraphVal $d 'isDefault') }) }
+        }
+    } catch { }
+    if ($list.Count -eq 0) {
+        # Fallback: at least offer the signed-in account's own domain.
+        $ctx = Get-GraphContextSafe
+        if ($ctx -and $ctx.Account -and $ctx.Account.Contains('@')) {
+            [void]$list.Add(@{ Name = $ctx.Account.Split('@')[-1]; IsDefault = $true })
+        }
+    }
+    $script:VerifiedDomains = $list.ToArray()
 }
 
 function Get-VerifiedDomainList {
