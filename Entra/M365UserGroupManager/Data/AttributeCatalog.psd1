@@ -51,22 +51,15 @@
     # =====================================================================================
 
     User = @(
-        @{
-            Name = 'Identity & Sign-in'
-            Attributes = @(
-                @{ Name = 'userPrincipalName'; Label = 'User Principal Name'; Input = 'Upn';      Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  Help = 'sign-in name; local part auto-fills from the name, domain is a verified tenant domain' }
-                @{ Name = 'mailNickname';      Label = 'Mail Nickname (alias)'; Input = 'Text';    Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  MaxLength = 64; Help = 'auto-fills as first.last from the name; no spaces; ASCII only' }
-                @{ Name = 'id';                Label = 'Object ID';           Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false }
-                @{ Name = 'mail';              Label = 'Primary Email';       Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $true;  Help = 'managed in Exchange; not writable via Graph' }
-                @{ Name = 'proxyAddresses';    Label = 'Proxy Addresses';     Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false; Help = 'read-only in Graph; recalculated from the primary email' }
-            )
-        }
+        # Section order is deliberate: New (create) mode shows the ShowOnNew/required fields in this
+        # order -- Name -> Account -> Identity -> Licensing -- to guide a focused new-hire flow. Edit
+        # mode shows the Settings-enabled fields in the same section order, then the detail sections.
         @{
             Name = 'Name'
             Attributes = @(
-                @{ Name = 'displayName'; Label = 'Display Name'; Input = 'Text'; Writable = $true; Required = $false; RequiredForCreate = $true; DefaultShow = $true; MaxLength = 256; Help = 'auto-fills as "First Last" from the name fields' }
                 @{ Name = 'givenName';   Label = 'First Name';   Input = 'Text'; Writable = $true; Required = $true;  DefaultShow = $true; Help = 'drives the auto-generated display name, alias, and sign-in name' }
                 @{ Name = 'surname';     Label = 'Last Name';    Input = 'Text'; Writable = $true; Required = $true;  DefaultShow = $true; Help = 'drives the auto-generated display name, alias, and sign-in name' }
+                @{ Name = 'displayName'; Label = 'Display Name'; Input = 'Text'; Writable = $true; Required = $false; RequiredForCreate = $true; DefaultShow = $true; MaxLength = 256; Help = 'auto-fills as "First Last" from the name fields' }
             )
         }
         @{
@@ -79,11 +72,27 @@
             )
         }
         @{
+            Name = 'Identity & Sign-in'
+            Attributes = @(
+                @{ Name = 'userPrincipalName'; Label = 'User Principal Name'; Input = 'Upn';      Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  Help = 'sign-in name; local part auto-fills from the name, domain is a verified tenant domain' }
+                @{ Name = 'mailNickname';      Label = 'Mail Nickname (alias)'; Input = 'Text';    Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  MaxLength = 64; Help = 'auto-fills as first.last from the name; no spaces; ASCII only' }
+                @{ Name = 'id';                Label = 'Object ID';           Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false }
+                @{ Name = 'mail';              Label = 'Primary Email';       Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $true;  Help = 'managed in Exchange; not writable via Graph' }
+                @{ Name = 'proxyAddresses';    Label = 'Proxy Addresses';     Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false; Help = 'read-only in Graph; recalculated from the primary email' }
+            )
+        }
+        @{
+            Name = 'Licensing'
+            Attributes = @(
+                @{ Name = 'assignedLicenses'; Label = 'Licenses'; Input = 'License'; Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $false; Authority = 'Cloud'; Help = 'usage location must be set first. License assignment is always a cloud operation, even for synced users' }
+            )
+        }
+        @{
             Name = 'Job & Organization'
             Attributes = @(
-                @{ Name = 'jobTitle';         Label = 'Job Title';        Input = 'Text';   Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true }
-                @{ Name = 'department';       Label = 'Department';       Input = 'Text';   Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true }
-                @{ Name = 'manager';          Label = 'Manager';          Input = 'Person'; Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true;  Multi = $false; TargetType = 'User' }
+                @{ Name = 'jobTitle';         Label = 'Job Title';        Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $true }
+                @{ Name = 'department';       Label = 'Department';       Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $true }
+                @{ Name = 'manager';          Label = 'Manager';          Input = 'Person'; Writable = $true; Required = $false; DefaultShow = $true;  Multi = $false; TargetType = 'User' }
                 @{ Name = 'companyName';      Label = 'Company Name';     Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $false }
                 @{ Name = 'employeeId';       Label = 'Employee ID';      Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $false }
                 @{ Name = 'employeeType';     Label = 'Employee Type';    Input = 'Text';   Writable = $true; Required = $false; DefaultShow = $false }
@@ -108,12 +117,6 @@
                 @{ Name = 'postalCode';        Label = 'Postal Code';        Input = 'Text'; Writable = $true; Required = $false; DefaultShow = $false }
                 @{ Name = 'country';           Label = 'Country';            Input = 'Text'; Writable = $true; Required = $false; DefaultShow = $false }
                 @{ Name = 'preferredLanguage'; Label = 'Preferred Language'; Input = 'Text'; Writable = $true; Required = $false; DefaultShow = $false; Help = 'e.g. en-US' }
-            )
-        }
-        @{
-            Name = 'Licensing'
-            Attributes = @(
-                @{ Name = 'assignedLicenses'; Label = 'Licenses'; Input = 'License'; Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $false; Authority = 'Cloud'; Help = 'usage location must be set first. License assignment is always a cloud operation, even for synced users' }
             )
         }
         @{

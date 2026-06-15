@@ -303,12 +303,18 @@ Assert-That 'new-user required model: First/Last marked required; display/alias/
         (-not $b['accountEnabled'].Required)
     }
 }
-Assert-That 'New-user form is CURATED: essentials shown, profile extras hidden until Edit' {
+Assert-That 'New-user form is CURATED: create essentials shown; profile detail (job/dept/manager/etc.) hidden until Edit' {
     & $mod {
         $newSet = @(Get-CatalogAttributeList -Tab 'User' | Where-Object { $_.ShowOnNew -or $_.Required -or $_.RequiredForCreate } | ForEach-Object { $_.Name })
-        $haveEssentials = @('givenName', 'surname', 'displayName', 'userPrincipalName', 'passwordProfile', 'accountEnabled', 'usageLocation', 'jobTitle', 'department', 'manager', 'assignedLicenses') | Where-Object { $newSet -notcontains $_ }
-        $haveExtras = @('employeeId', 'streetAddress', 'extensionAttribute1', 'mobilePhone', 'otherMails', 'userType', 'companyName') | Where-Object { $newSet -contains $_ }
-        (-not $haveEssentials) -and (-not $haveExtras)
+        $missingEssentials = @('givenName', 'surname', 'displayName', 'userPrincipalName', 'mailNickname', 'passwordProfile', 'accountEnabled', 'usageLocation', 'assignedLicenses') | Where-Object { $newSet -notcontains $_ }
+        $leakedExtras = @('jobTitle', 'department', 'manager', 'employeeId', 'streetAddress', 'extensionAttribute1', 'mobilePhone', 'otherMails', 'userType', 'companyName') | Where-Object { $newSet -contains $_ }
+        (-not $missingEssentials) -and (-not $leakedExtras)
+    }
+}
+Assert-That 'User section order guides the New flow: Name, Account, Identity, Licensing' {
+    & $mod {
+        $secs = @(Get-CatalogTab -Tab 'User' | ForEach-Object { $_.Name })
+        ($secs[0] -eq 'Name') -and ($secs[1] -eq 'Account') -and ($secs[2] -eq 'Identity & Sign-in') -and ($secs[3] -eq 'Licensing')
     }
 }
 Assert-That 'New-group form shows type/name/description/members/owners, not read-only fields' {

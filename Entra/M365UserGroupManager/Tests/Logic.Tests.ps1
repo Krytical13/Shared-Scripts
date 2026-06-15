@@ -25,12 +25,12 @@ Describe 'Configuration' {
     It 'returns enabled attribute objects in catalog order, filtered to the enabled set' {
         InModuleScope M365UserGroupManager {
             $script:Config = New-DefaultConfig
-            $script:Config.Users.Enabled = @('givenName', 'displayName')   # deliberately out of catalog order
+            $script:Config.Users.Enabled = @('displayName', 'givenName')   # deliberately out of catalog order
             $objs = Get-EnabledAttributeObjects -Tab 'User'
             @($objs).Count | Should -Be 2
-            # displayName precedes givenName in the catalog, so it must come first regardless of config order.
-            $objs[0].Name | Should -Be 'displayName'
-            $objs[1].Name | Should -Be 'givenName'
+            # givenName (First Name) precedes displayName in the catalog, so it must come first regardless of config order.
+            $objs[0].Name | Should -Be 'givenName'
+            $objs[1].Name | Should -Be 'displayName'
         }
     }
 
