@@ -23,7 +23,7 @@ Describe 'Attribute catalog' {
     }
 
     It 'uses only known Input types' {
-        $valid = 'Text', 'Multi', 'Bool', 'Choice', 'Date', 'Person', 'ReadOnly', 'Password', 'License', 'ExtAttr', 'GroupType'
+        $valid = 'Text', 'Multi', 'Bool', 'Choice', 'Date', 'Person', 'ReadOnly', 'Password', 'License', 'ExtAttr', 'GroupType', 'Upn'
         ($script:AllAttrs | Where-Object { $valid -notcontains $_.Input }) | Should -BeNullOrEmpty
     }
 

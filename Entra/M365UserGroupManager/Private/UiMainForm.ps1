@@ -228,9 +228,9 @@ function Build-TabForm {
         # Show every enabled attribute (incl. ReadOnly) so the Settings checkboxes are truthful --
         # checked = shown. ReadOnly fields render empty/greyed on a New object (value appears once
         # it exists); they are simply not editable.
-        # Required fields are ALWAYS shown when creating (and marked with *), even if unchecked in
-        # Settings -- the object can't be created without them.
-        $attrs = @($group.Attributes | Where-Object { ($enabled -contains $_.Name) -or ($ctx.Mode -eq 'New' -and $_.Required) })
+        # Fields required to create (marked * or auto-generated) are ALWAYS shown when creating, even
+        # if unchecked in Settings -- the object can't be created without them.
+        $attrs = @($group.Attributes | Where-Object { ($enabled -contains $_.Name) -or ($ctx.Mode -eq 'New' -and ($_.Required -or $_.RequiredForCreate)) })
         if ($attrs.Count -eq 0) { continue }
         [void]$plan.Add(@{ Header = $group.Name })
         foreach ($a in $attrs) { [void]$plan.Add(@{ Attr = $a }) }
@@ -270,6 +270,14 @@ function Build-TabForm {
         $ctx.Fields['accountEnabled'].Main.Checked = $true
     }
 
+    # New user: typing First/Last auto-fills displayName, alias, and the UPN local part.
+    if ($Tab -eq 'User' -and $ctx.Mode -eq 'New') {
+        foreach ($n in 'givenName', 'surname') {
+            $nf = $ctx.Fields[$n]
+            if ($nf -and $nf.Main) { $nf.Main.Add_TextChanged({ Update-NewUserGeneratedFields }) }
+        }
+    }
+
     # License pickers need the tenant SKUs. Only fetch them once the app is ready (i.e. AFTER the
     # user has connected) -- never during initial construction -- so launching the tool makes no
     # Graph call and can't trigger a sign-in prompt before Connect is clicked.
@@ -282,6 +290,42 @@ function Build-TabForm {
     $tlp.ResumeLayout()
     $ctx.SaveBtn.Text = if ($ctx.Mode -eq 'New') { "&Create $(if ($Tab -eq 'User') { 'user' } else { 'group' })" } else { '&Save changes' }
     Set-TabActionState -Tab $Tab
+}
+
+function Set-AutoField {
+    <# Set a field's value only while the user hasn't manually changed it (current == last auto value,
+       or empty), so name-driven auto-fill stops once they override it. Works for Text and the UPN
+       local part (both use $Field.Main.Text). #>
+    param($Field, [string]$Value)
+    if (-not $Field -or -not $Field.Main) { return }
+    $cur = [string]$Field.Main.Text
+    if ($cur -eq '' -or $cur -eq [string]$Field.AutoLast) {
+        $Field.Main.Text = $Value
+        $Field.AutoLast = $Value
+    }
+}
+
+function Get-GeneratedUserNames {
+    <# Pure: derive the Display Name ("First Last") and alias (first.last, lowercased, ASCII-only) from
+       a first + last name. Alias is also the UPN local part. #>
+    param([string]$First, [string]$Last)
+    $display = ("$First $Last").Trim()
+    $alias   = ((("$First.$Last") -replace '[^A-Za-z0-9.]', '').ToLower()).Trim('.')
+    return @{ Display = $display; Alias = $alias }
+}
+
+function Update-NewUserGeneratedFields {
+    <# New-user convenience: derive Display Name, alias and the UPN local part from the First/Last
+       name fields. Each target auto-fills only until the operator edits it. #>
+    $ctx = $script:UI.User
+    if (-not $ctx -or $ctx.Mode -ne 'New') { return }
+    $g = $ctx.Fields
+    $first = if ($g.ContainsKey('givenName') -and $g['givenName']) { [string](Read-FieldValue $g['givenName']) } else { '' }
+    $last  = if ($g.ContainsKey('surname')   -and $g['surname'])   { [string](Read-FieldValue $g['surname']) }   else { '' }
+    $gen = Get-GeneratedUserNames -First $first -Last $last
+    if ($g.ContainsKey('displayName'))       { Set-AutoField -Field $g['displayName']       -Value $gen.Display }
+    if ($g.ContainsKey('mailNickname'))      { Set-AutoField -Field $g['mailNickname']      -Value $gen.Alias }
+    if ($g.ContainsKey('userPrincipalName')) { Set-AutoField -Field $g['userPrincipalName'] -Value $gen.Alias }
 }
 
 function Set-TabMode {
@@ -359,6 +403,7 @@ function Complete-Connection {
     Update-ConnectionLabel
     Update-ExchangeActivation
     Initialize-SkuMap -Force
+    Initialize-VerifiedDomains          # for the UPN domain dropdown (must precede Build-TabForm)
     foreach ($tab in 'User', 'Group') { Build-TabForm -Tab $tab }
     $missing = Get-MissingScopes
     if ($missing.Count -gt 0) {

@@ -111,3 +111,33 @@ function Get-TenantDomainHint {
     }
     return [string]$Context.TenantId
 }
+
+function Initialize-VerifiedDomains {
+    <# Fetch the tenant's verified domains for the UPN domain dropdown. Best-effort; refreshed on
+       each connect/switch (covered by Organization.Read.All). #>
+    $script:VerifiedDomains = @()
+    try {
+        $org = Get-MgOrganization -Property 'verifiedDomains' -ErrorAction Stop | Select-Object -First 1
+        $script:VerifiedDomains = @(
+            @(Get-GraphVal $org 'verifiedDomains') | ForEach-Object {
+                if ($_) { @{ Name = [string](Get-GraphVal $_ 'name'); IsDefault = [bool](Get-GraphVal $_ 'isDefault') } }
+            } | Where-Object { $_.Name }
+        )
+    } catch { $script:VerifiedDomains = @() }
+}
+
+function Get-VerifiedDomainList {
+    <# Verified domain names, default domain first, for the UPN domain dropdown. #>
+    $def  = @($script:VerifiedDomains | Where-Object { $_.IsDefault } | ForEach-Object { $_.Name })
+    $rest = @($script:VerifiedDomains | Where-Object { -not $_.IsDefault } | ForEach-Object { $_.Name } | Sort-Object)
+    return @($def + $rest)
+}
+
+function Get-DefaultVerifiedDomain {
+    <# The tenant's default verified domain (or the first, or '' if none fetched yet). #>
+    $d = @($script:VerifiedDomains | Where-Object { $_.IsDefault }) | Select-Object -First 1
+    if ($d) { return $d.Name }
+    $f = @($script:VerifiedDomains) | Select-Object -First 1
+    if ($f) { return $f.Name }
+    return ''
+}

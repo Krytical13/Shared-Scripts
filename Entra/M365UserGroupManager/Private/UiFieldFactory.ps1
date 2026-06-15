@@ -137,6 +137,8 @@ function New-FieldRow {
         # Snapshot of the loaded Person objects (with UPN), so a synced-group membership diff can be
         # resolved to AD accounts on save. Array (not the live List) so later edits don't mutate it.
         OriginalPeople = @()
+        # Last value written by name-driven auto-generation; lets auto-fill stop once the user edits.
+        AutoLast = ''
     }
 
     switch ($Attr.Input) {
@@ -155,6 +157,23 @@ function New-FieldRow {
             $tb.BackColor = $t.ReadOnlyBg
             $tb.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 4)
             $field.Main = $tb; $field.Cell = $tb
+        }
+
+        'Upn' {
+            # sign-in local part + "@" + a domain combo (the tenant's verified domains).
+            $cell = New-CellTable -Cols 3 -Rows 1 -Height 30
+            Add-ColumnStyle $cell 'Percent' 58; Add-ColumnStyle $cell 'AutoSize'; Add-ColumnStyle $cell 'Percent' 42
+            Add-RowStyle $cell 'Percent' 100
+            $local = New-Object System.Windows.Forms.TextBox; $local.Dock = 'Fill'; $local.Margin = New-Object System.Windows.Forms.Padding(3, 4, 1, 4)
+            if ($Attr.MaxLength) { $local.MaxLength = [int]$Attr.MaxLength }
+            $at = New-Object System.Windows.Forms.Label; $at.Text = '@'; $at.AutoSize = $true; $at.Anchor = 'Left'; $at.Margin = New-Object System.Windows.Forms.Padding(2, 8, 2, 3)
+            $dom = New-Object System.Windows.Forms.ComboBox; $dom.Dock = 'Fill'; $dom.DropDownStyle = 'DropDown'   # editable: list verified domains, allow any if needed
+            $dom.Margin = New-Object System.Windows.Forms.Padding(1, 4, 3, 4)
+            foreach ($d in (Get-VerifiedDomainList)) { [void]$dom.Items.Add($d) }
+            $def = Get-DefaultVerifiedDomain
+            if ($def) { $dom.Text = $def }
+            $cell.Controls.Add($local, 0, 0); $cell.Controls.Add($at, 1, 0); $cell.Controls.Add($dom, 2, 0)
+            $field.Main = $local; $field.Aux = $dom; $field.Cell = $cell
         }
 
         'Multi' {
@@ -349,6 +368,12 @@ function Read-FieldValue {
     param($Field)
     switch ($Field.Kind) {
         { $_ -in 'Text', 'ReadOnly', 'ExtAttr' } { return $Field.Main.Text.Trim() }
+        'Upn' {
+            $loc = $Field.Main.Text.Trim()
+            if (-not $loc) { return '' }
+            $dom = ([string]$Field.Aux.Text).Trim().TrimStart('@')
+            if ($dom) { return "$loc@$dom" } else { return $loc }
+        }
         'Multi'  { return (ConvertTo-StringList $Field.Main.Lines) }
         'Bool'   { return [bool]$Field.Main.Checked }
         'Choice' {
@@ -396,6 +421,17 @@ function Set-FieldValue {
     param($Field, $Value)
     switch ($Field.Kind) {
         { $_ -in 'Text', 'ReadOnly', 'ExtAttr' } { $Field.Main.Text = [string](Format-Cell $Value) }
+        'Upn' {
+            $sv = [string](Format-Cell $Value)
+            if ($sv -match '^(.+?)@(.+)$') {
+                $Field.Main.Text = $Matches[1]
+                $d = $Matches[2]
+                if (-not ($Field.Aux.Items -contains $d)) { [void]$Field.Aux.Items.Add($d) }
+                $Field.Aux.Text = $d
+            } else {
+                $Field.Main.Text = $sv
+            }
+        }
         'Multi' { $Field.Main.Text = ((ConvertTo-StringList $Value) -join [Environment]::NewLine) }
         'Bool'  { $Field.Main.Checked = [bool]$Value }
         'Choice' {
@@ -522,6 +558,12 @@ function Get-FieldValidationError {
             default     { [string]::IsNullOrWhiteSpace([string]$v) }
         }
         if ($empty) { return "$($a.Label) is required." }
+    }
+
+    # Auto-generated-but-required-to-create fields (display name / alias / UPN) must still be
+    # non-empty to create, even though they aren't marked with a * (they normally auto-fill).
+    if ($a.RequiredForCreate -and $Field.Mode -eq 'New' -and [string]::IsNullOrWhiteSpace([string]$v)) {
+        return "$($a.Label) is required (it normally auto-fills from the first/last name)."
     }
 
     # A distribution group / mail-enabled security group must always keep >=1 owner (Exchange

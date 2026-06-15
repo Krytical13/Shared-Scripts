@@ -131,7 +131,7 @@ foreach ($g in @($catalog.User) + @($catalog.Group)) { $allAttrs += $g.Attribute
 Assert-That 'every attribute has Name/Label/Input' {
     -not ($allAttrs | Where-Object { -not $_.Name -or -not $_.Label -or -not $_.Input })
 }
-$validInputs = 'Text', 'Multi', 'Bool', 'Choice', 'Date', 'Person', 'ReadOnly', 'Password', 'License', 'ExtAttr', 'GroupType'
+$validInputs = 'Text', 'Multi', 'Bool', 'Choice', 'Date', 'Person', 'ReadOnly', 'Password', 'License', 'ExtAttr', 'GroupType', 'Upn'
 Assert-That 'all Input types are known' {
     -not ($allAttrs | Where-Object { $validInputs -notcontains $_.Input })
 }
@@ -278,6 +278,29 @@ Assert-That 'usage location dropdown: full-name items, 2-letter code value round
         $us = $f.Main.Items | Where-Object { $_.Code -eq 'US' }
         Set-FieldValue -Field $f -Value 'gb'
         ($us -and ($us.Display -match 'United States')) -and ((Read-FieldValue $f) -eq 'GB')
+    }
+}
+Assert-That 'UPN field round-trips local@domain' {
+    & $mod {
+        $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
+        $f = New-FieldRow -Attr @{ Name = 'userPrincipalName'; Label = 'UPN'; Input = 'Upn'; Writable = $true } -Mode 'New' -Tlp $tlp -Tooltip (New-Object System.Windows.Forms.ToolTip)
+        Set-FieldValue -Field $f -Value 'jane.doe@contoso.com'
+        (Read-FieldValue $f) -eq 'jane.doe@contoso.com'
+    }
+}
+Assert-That 'name generation: First/Last -> "First Last" + sanitized first.last alias' {
+    & $mod {
+        $g = Get-GeneratedUserNames -First "O'Brien" -Last 'Smith'
+        ($g.Display -eq "O'Brien Smith") -and ($g.Alias -eq 'obrien.smith')
+    }
+}
+Assert-That 'new-user required model: First/Last marked required; display/alias/UPN required-to-create (unmarked); accountEnabled not required' {
+    & $mod {
+        $b = @{}; foreach ($a in (Get-CatalogAttributeList -Tab 'User')) { $b[$a.Name] = $a }
+        $b['givenName'].Required -and $b['surname'].Required -and
+        (-not $b['displayName'].Required) -and $b['displayName'].RequiredForCreate -and
+        (-not $b['userPrincipalName'].Required) -and $b['userPrincipalName'].RequiredForCreate -and ($b['userPrincipalName'].Input -eq 'Upn') -and
+        (-not $b['accountEnabled'].Required)
     }
 }
 

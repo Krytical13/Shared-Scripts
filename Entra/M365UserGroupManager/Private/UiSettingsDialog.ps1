@@ -62,9 +62,9 @@ function Show-SettingsDialog {
         foreach ($attr in $group.Attributes) {
             $cb = New-Object System.Windows.Forms.CheckBox
             $cb.AutoSize = $true; $cb.Tag = $attr
-            if ($attr.Required) {
-                # Required-to-create fields are always shown (and marked *) -- lock them on here so
-                # the Settings list reflects that and they can't be unchecked.
+            if ($attr.Required -or $attr.RequiredForCreate) {
+                # Required-to-create fields (marked * or auto-generated) are always shown when creating
+                # -- lock them on here so the Settings list reflects that and they can't be unchecked.
                 $cb.Text = $attr.Label + '  (required)'; $cb.Checked = $true; $cb.Enabled = $false
             } else {
                 $cb.Text = $attr.Label; $cb.Checked = ($enabled -contains $attr.Name)
