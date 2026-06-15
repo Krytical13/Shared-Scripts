@@ -94,7 +94,9 @@ function New-Passphrase {
     #>
     param([int]$WordCount = 3)
     $words = Get-PassphraseWordList
-    $specials = '!@#$%^&*?+='.ToCharArray()    # no '_' / '-' so the trailing symbol can't form a run
+    # Conservative symbol set: all are Entra/AD-policy-allowed AND broadly safe across apps/shells/URLs
+    # (deliberately excludes & ^ ? + = _ etc. which can trip up legacy apps). '-' is the word separator.
+    $specials = '!@#$%'.ToCharArray()
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     $picked = New-Object System.Collections.Generic.List[string]
     $guard = 0
@@ -107,6 +109,19 @@ function New-Passphrase {
     $digit   = [string]((Get-RandomIndex -Rng $rng -Count 8) + 2)   # 2..9 (skip ambiguous 0/1)
     $special = [string]$specials[(Get-RandomIndex -Rng $rng -Count $specials.Count)]
     return (($picked -join '-') + $digit + $special)
+}
+
+function Set-CharFilter {
+    <# Block typed characters that don't match an allowed-character regex (control keys pass; pasted
+       text is still validated on save). No-op without a pattern. The pattern lives on the control's
+       Tag so the plain KeyPress handler can read it via $s.Tag -- no closure, keeps module affinity. #>
+    param([System.Windows.Forms.Control]$Control, [string]$Pattern)
+    if (-not $Pattern -or -not $Control) { return }
+    $Control.Tag = $Pattern
+    $Control.Add_KeyPress({
+            param($s, $e)
+            if (-not [char]::IsControl($e.KeyChar) -and (([string]$e.KeyChar) -notmatch [string]$s.Tag)) { $e.Handled = $true }
+        })
 }
 
 function Format-PersonLine {
@@ -180,6 +195,7 @@ function New-FieldRow {
             $tb.Anchor = 'Left,Right'; $tb.Width = 320
             $tb.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 4)
             if ($Attr.MaxLength) { $tb.MaxLength = [int]$Attr.MaxLength }
+            Set-CharFilter -Control $tb -Pattern $Attr.CharFilter
             $field.Main = $tb; $field.Cell = $tb
         }
 
@@ -198,6 +214,7 @@ function New-FieldRow {
             Add-RowStyle $cell 'Percent' 100
             $local = New-Object System.Windows.Forms.TextBox; $local.Dock = 'Fill'; $local.Margin = New-Object System.Windows.Forms.Padding(3, 4, 1, 4)
             if ($Attr.MaxLength) { $local.MaxLength = [int]$Attr.MaxLength }
+            Set-CharFilter -Control $local -Pattern $Attr.CharFilter
             $at = New-Object System.Windows.Forms.Label; $at.Text = '@'; $at.AutoSize = $true; $at.Anchor = 'Left'; $at.Margin = New-Object System.Windows.Forms.Padding(2, 8, 2, 3)
             $dom = New-Object System.Windows.Forms.ComboBox; $dom.Dock = 'Fill'; $dom.DropDownStyle = 'DropDown'   # editable: list verified domains, allow any if needed
             $dom.Margin = New-Object System.Windows.Forms.Padding(1, 4, 3, 4)

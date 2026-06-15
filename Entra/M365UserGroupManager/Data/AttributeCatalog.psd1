@@ -40,6 +40,9 @@
     #    Multi       Input=Person: $true = pick many, $false = pick one.
     #    TargetType  Input=Person: 'User' | 'Group' | 'Any' (what the picker searches).
     #    MaxLength   optional length cap mirrored onto the TextBox.
+    #    CharFilter  optional regex character-CLASS of ALLOWED characters; the textbox blocks any typed
+    #                character that doesn't match (control keys pass; pasted text is still validated on
+    #                save). Stops invalid input in name / alias / UPN fields up front.
     #    Help        optional tooltip.
     #    Authority   hybrid edit routing: where this field is mastered when the loaded object is
     #                directory-SYNCED from on-prem AD. 'Cloud' = stays cloud-editable even for a
@@ -57,8 +60,8 @@
         @{
             Name = 'Name'
             Attributes = @(
-                @{ Name = 'givenName';   Label = 'First Name';   Input = 'Text'; Writable = $true; Required = $true;  DefaultShow = $true; Help = 'drives the auto-generated display name, alias, and sign-in name' }
-                @{ Name = 'surname';     Label = 'Last Name';    Input = 'Text'; Writable = $true; Required = $true;  DefaultShow = $true; Help = 'drives the auto-generated display name, alias, and sign-in name' }
+                @{ Name = 'givenName';   Label = 'First Name';   Input = 'Text'; Writable = $true; Required = $true;  DefaultShow = $true; CharFilter = '[\p{L}\p{M}0-9 .\-'',]'; Help = 'drives the auto-generated display name, alias, and sign-in name' }
+                @{ Name = 'surname';     Label = 'Last Name';    Input = 'Text'; Writable = $true; Required = $true;  DefaultShow = $true; CharFilter = '[\p{L}\p{M}0-9 .\-'',]'; Help = 'drives the auto-generated display name, alias, and sign-in name' }
                 @{ Name = 'displayName'; Label = 'Display Name'; Input = 'Text'; Writable = $true; Required = $false; RequiredForCreate = $true; DefaultShow = $true; MaxLength = 256; Help = 'auto-fills as "First Last" from the name fields' }
             )
         }
@@ -68,14 +71,14 @@
                 @{ Name = 'accountEnabled'; Label = 'Account Enabled';        Input = 'Bool';     Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true; Help = 'defaults to enabled; uncheck to create a disabled account' }
                 @{ Name = 'passwordProfile';Label = 'Password';               Input = 'Password'; Writable = $true; Required = $true;  DefaultShow = $true;  Help = 'for a synced user the reset is applied on-premises in AD; cloud-only users reset in the cloud (Authority defaults to OnPrem)' }
                 @{ Name = 'usageLocation';  Label = 'Usage Location';         Input = 'Choice';   Writable = $true; Required = $false; ShowOnNew = $true; DefaultShow = $true;  Authority = 'Cloud'; ChoiceSource = 'Country'; Help = 'two-letter country code; required before assigning a license (cloud property)' }
-                @{ Name = 'userType';       Label = 'User Type';              Input = 'Choice';   Writable = $true; Required = $false; DefaultShow = $false; Authority = 'Cloud'; Choices = @('Member', 'Guest') }
+                @{ Name = 'userType';       Label = 'User Type';              Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false; Help = 'Member or Guest -- read-only. Guests are created via the invitation flow, not by toggling this; Member<->Guest conversion is not a normal operation' }
             )
         }
         @{
             Name = 'Identity & Sign-in'
             Attributes = @(
-                @{ Name = 'userPrincipalName'; Label = 'User Principal Name'; Input = 'Upn';      Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  Help = 'sign-in name; local part auto-fills from the name, domain is a verified tenant domain' }
-                @{ Name = 'mailNickname';      Label = 'Mail Nickname (alias)'; Input = 'Text';    Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  MaxLength = 64; Help = 'auto-fills as first.last from the name; no spaces; ASCII only' }
+                @{ Name = 'userPrincipalName'; Label = 'User Principal Name'; Input = 'Upn';      Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  CharFilter = '[A-Za-z0-9''.\-_!#^~]'; Help = 'sign-in name; local part auto-fills from the name, domain is a verified tenant domain' }
+                @{ Name = 'mailNickname';      Label = 'Mail Nickname (alias)'; Input = 'Text';    Writable = $true;  Required = $false; RequiredForCreate = $true; DefaultShow = $true;  MaxLength = 64; CharFilter = '[A-Za-z0-9.\-_]'; Help = 'auto-fills as first.last from the name; no spaces; ASCII only' }
                 @{ Name = 'id';                Label = 'Object ID';           Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false }
                 @{ Name = 'mail';              Label = 'Primary Email';       Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $true;  Help = 'managed in Exchange; not writable via Graph' }
                 @{ Name = 'proxyAddresses';    Label = 'Proxy Addresses';     Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false; Help = 'read-only in Graph; recalculated from the primary email' }

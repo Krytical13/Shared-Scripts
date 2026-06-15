@@ -200,8 +200,8 @@ Assert-That 'catalog Authority values are all known (Cloud/OnPrem/ReadOnly)' {
 Assert-That 'expected Cloud-authoritative user fields, identity fields excluded' {
     & $mod {
         $cloud = @(Get-CatalogAttributeList -Tab 'User' | Where-Object { (Resolve-FieldAuthority $_) -eq 'Cloud' } | ForEach-Object { $_.Name })
-        ($cloud -contains 'assignedLicenses') -and ($cloud -contains 'usageLocation') -and ($cloud -contains 'userType') -and
-        ($cloud -notcontains 'displayName') -and ($cloud -notcontains 'accountEnabled') -and ($cloud -notcontains 'passwordProfile')
+        ($cloud -contains 'assignedLicenses') -and ($cloud -contains 'usageLocation') -and
+        ($cloud -notcontains 'displayName') -and ($cloud -notcontains 'accountEnabled') -and ($cloud -notcontains 'passwordProfile') -and ($cloud -notcontains 'userType')
     }
 }
 Assert-That 'ConvertTo-AdAttributeWrites: Replace/Clear/Unsupported + multi-first (5.1 array path)' {
@@ -288,11 +288,28 @@ Assert-That 'New-Passphrase: has upper+lower+digit+symbol and no symbol runs (e.
             if ($p -cnotmatch '[A-Z]') { $ok = $false }                 # uppercase (capitalized words)
             if ($p -cnotmatch '[a-z]') { $ok = $false }                 # lowercase
             if ($p -notmatch '[0-9]') { $ok = $false }                  # a digit
-            if ($p -notmatch '[!@#$%^&*?+=\-]') { $ok = $false }        # a symbol
-            if ($p -match '[-_!@#$%^&*?+=]{2,}') { $ok = $false }        # NO run of symbols
+            if ($p -notmatch '[!@#$%\-]') { $ok = $false }              # a symbol
+            if ($p -match '[!@#$%\-]{2,}') { $ok = $false }             # NO run of symbols
+            if ($p -match '[&^?+=_]') { $ok = $false }                  # none of the shell/URL-risky symbols
             if ($p.Length -lt 10) { $ok = $false }
         }
         $ok
+    }
+}
+Assert-That 'CharFilter: alias field allows letters/dot but blocks space/@' {
+    & $mod {
+        $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
+        $f = New-FieldRow -Attr @{ Name = 'mailNickname'; Label = 'Alias'; Input = 'Text'; Writable = $true; CharFilter = '[A-Za-z0-9.\-_]' } -Mode 'New' -Tlp $tlp -Tooltip (New-Object System.Windows.Forms.ToolTip)
+        $pat = [string]$f.Main.Tag
+        $pat -and ('a' -match $pat) -and ('.' -match $pat) -and ('@' -notmatch $pat) -and (' ' -notmatch $pat)
+    }
+}
+Assert-That 'catalog CharFilter patterns are valid regex' {
+    & $mod {
+        $bad = foreach ($a in (Get-CatalogAttributeList -Tab 'User')) {
+            if ($a.CharFilter) { try { [void][regex]::new($a.CharFilter) } catch { $a.Name } }
+        }
+        -not $bad
     }
 }
 Assert-That 'UPN field round-trips local@domain' {

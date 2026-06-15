@@ -99,15 +99,16 @@ Describe 'Catalog Authority metadata' {
         InModuleScope M365UserGroupManager {
             $cloudUser = @(Get-CatalogAttributeList -Tab 'User' |
                 Where-Object { (Resolve-FieldAuthority $_) -eq 'Cloud' } | ForEach-Object { $_.Name })
-            # licenses, usageLocation, userType, employeeHireDate stay cloud-writable for synced users
+            # licenses, usageLocation, employeeHireDate stay cloud-writable for synced users
             $cloudUser | Should -Contain 'assignedLicenses'
             $cloudUser | Should -Contain 'usageLocation'
-            $cloudUser | Should -Contain 'userType'
-            # identity attrs + password + enable/disable go to AD when synced -> NOT cloud-authoritative
+            # identity attrs + password + enable/disable go to AD when synced -> NOT cloud-authoritative;
+            # userType is now read-only (guests are created via invitation), so it's not cloud-writable either
             $cloudUser | Should -Not -Contain 'displayName'
             $cloudUser | Should -Not -Contain 'jobTitle'
             $cloudUser | Should -Not -Contain 'accountEnabled'
             $cloudUser | Should -Not -Contain 'passwordProfile'
+            $cloudUser | Should -Not -Contain 'userType'
         }
     }
 }

@@ -1200,7 +1200,9 @@ function Show-TypedConfirm {
     Set-SecondaryButtonStyle $ok; Set-SecondaryButtonStyle $cancel
     $box.Add_TextChanged({ $ok.Enabled = ($box.Text -ceq $Expected) }.GetNewClosure())
     $dlg.Controls.AddRange(@($lbl, $box, $ok, $cancel))
-    $dlg.AcceptButton = $ok; $dlg.CancelButton = $cancel
+    # Safety: Enter and Escape both CANCEL -- deleting requires an explicit click on the (red) Delete
+    # button, which only enables after the exact name is typed. Enter must never trigger a delete.
+    $dlg.AcceptButton = $cancel; $dlg.CancelButton = $cancel
 
     $result = $dlg.ShowDialog()
     $dlg.Dispose()
