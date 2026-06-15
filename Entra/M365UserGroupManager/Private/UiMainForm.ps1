@@ -22,6 +22,7 @@ function New-MainForm {
     $form.StartPosition = 'CenterScreen'
     $form.Font = $t.FontBase
     $form.AutoScaleMode = 'Font'
+    $form.BackColor = $t.Surface
     try { $form.Icon = [System.Drawing.SystemIcons]::Application } catch { }
 
     $tooltip = New-Object System.Windows.Forms.ToolTip
@@ -36,8 +37,10 @@ function New-MainForm {
     [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 62)))
     $form.Controls.Add($root)
 
-    # --- Top: connect + tenant bar ---------------------------------------------------------
-    $top = New-Object System.Windows.Forms.Panel; $top.Dock = 'Fill'
+    # --- Top: connect + tenant bar (tinted band with a brand accent line) ------------------
+    $top = New-Object System.Windows.Forms.Panel; $top.Dock = 'Fill'; $top.BackColor = $t.SurfaceAlt
+    $topAccent = New-Object System.Windows.Forms.Panel; $topAccent.Height = 3; $topAccent.Dock = 'Bottom'; $topAccent.BackColor = $t.Brand
+    $top.Controls.Add($topAccent)
     $connectBtn = New-Object System.Windows.Forms.Button
     $connectBtn.Text = '&Connect'; $connectBtn.Location = New-Object System.Drawing.Point(10, 12); $connectBtn.Size = New-Object System.Drawing.Size(140, 30)
     $disconnectBtn = New-Object System.Windows.Forms.Button
@@ -57,7 +60,7 @@ function New-MainForm {
 
     # --- Bottom: status + progress ---------------------------------------------------------
     $bottom = New-Object System.Windows.Forms.TableLayoutPanel
-    $bottom.Dock = 'Fill'; $bottom.ColumnCount = 1; $bottom.RowCount = 2
+    $bottom.Dock = 'Fill'; $bottom.ColumnCount = 1; $bottom.RowCount = 2; $bottom.BackColor = $t.SurfaceAlt
     [void]$bottom.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 22)))
     [void]$bottom.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $progress = New-Object System.Windows.Forms.ProgressBar
@@ -102,7 +105,7 @@ function New-EntityTab {
     $entityWord = if ($Tab -eq 'User') { 'user' } else { 'group' }
 
     $page = New-Object System.Windows.Forms.TabPage
-    $page.Text = $Title; $page.UseVisualStyleBackColor = $true; $page.Padding = New-Object System.Windows.Forms.Padding(8)
+    $page.Text = $Title; $page.BackColor = $t.Surface; $page.UseVisualStyleBackColor = $false; $page.Padding = New-Object System.Windows.Forms.Padding(8)
 
     $layout = New-Object System.Windows.Forms.TableLayoutPanel
     $layout.Dock = 'Fill'; $layout.ColumnCount = 1; $layout.RowCount = 3
@@ -121,10 +124,21 @@ function New-EntityTab {
     $left.Dock = 'Fill'; $left.FlowDirection = 'LeftToRight'; $left.WrapContents = $false
     $modeNew = New-Object System.Windows.Forms.RadioButton; $modeNew.Text = "&New $entityWord"; $modeNew.AutoSize = $true; $modeNew.Checked = $true; $modeNew.Margin = New-Object System.Windows.Forms.Padding(3, 10, 8, 3)
     $modeEdit = New-Object System.Windows.Forms.RadioButton; $modeEdit.Text = '&Edit existing'; $modeEdit.AutoSize = $true; $modeEdit.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
+    # Account type (User tab only): create a Member, or invite an external Guest. Shown only in New mode.
+    $typeMember = $null; $typeGuest = $null
+    if ($Tab -eq 'User') {
+        $typeSep = New-Object System.Windows.Forms.Label; $typeSep.Text = '|'; $typeSep.AutoSize = $true; $typeSep.ForeColor = $t.Border; $typeSep.Margin = New-Object System.Windows.Forms.Padding(2, 11, 6, 3)
+        $typeMember = New-Object System.Windows.Forms.RadioButton; $typeMember.Text = '&Member'; $typeMember.AutoSize = $true; $typeMember.Checked = $true; $typeMember.Margin = New-Object System.Windows.Forms.Padding(3, 10, 6, 3)
+        $typeGuest = New-Object System.Windows.Forms.RadioButton; $typeGuest.Text = '&Guest (invite)'; $typeGuest.AutoSize = $true; $typeGuest.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
+    }
     $selectBtn = New-Object System.Windows.Forms.Button; $selectBtn.Text = "&Select $entityWord..."; $selectBtn.Width = 130; $selectBtn.Height = 26; $selectBtn.Visible = $false; $selectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 3)
     Set-SecondaryButtonStyle $selectBtn
     $targetLabel = New-Object System.Windows.Forms.Label; $targetLabel.AutoSize = $true; $targetLabel.Margin = New-Object System.Windows.Forms.Padding(3, 11, 3, 3); $targetLabel.ForeColor = $t.Muted; $targetLabel.Visible = $false
-    $left.Controls.AddRange(@($modeNew, $modeEdit, $selectBtn, $targetLabel))
+    if ($Tab -eq 'User') {
+        $left.Controls.AddRange(@($modeNew, $modeEdit, $typeSep, $typeMember, $typeGuest, $selectBtn, $targetLabel))
+    } else {
+        $left.Controls.AddRange(@($modeNew, $modeEdit, $selectBtn, $targetLabel))
+    }
 
     $settingsBtn = New-Object System.Windows.Forms.Button; $settingsBtn.Text = '&Fields...'; $settingsBtn.Width = 96; $settingsBtn.Height = 28; $settingsBtn.Margin = New-Object System.Windows.Forms.Padding(3, 7, 3, 3)
     Set-SecondaryButtonStyle $settingsBtn
@@ -140,6 +154,36 @@ function New-EntityTab {
     [void]$formTlp.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $scroll.Controls.Add($formTlp)
     $layout.Controls.Add($scroll, 0, 1)
+
+    # --- Guest-invite panel (User tab only): a distinct bordered, tinted box shown when "Guest" is
+    #     chosen. It shares the form row with the scroll host; the account-type toggle swaps them. ---
+    $guestBox = $null; $gEmail = $null; $gName = $null; $gSend = $null; $gUrl = $null
+    if ($Tab -eq 'User') {
+        $guestBox = New-Object System.Windows.Forms.GroupBox
+        $guestBox.Text = ' Guest invitation '; $guestBox.Dock = 'Fill'; $guestBox.Visible = $false
+        $guestBox.BackColor = $t.SurfaceAlt; $guestBox.ForeColor = $t.Accent
+        $guestBox.Margin = New-Object System.Windows.Forms.Padding(4, 6, 18, 6); $guestBox.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 12)
+        $gtlp = New-Object System.Windows.Forms.TableLayoutPanel
+        $gtlp.Dock = 'Top'; $gtlp.ColumnCount = 2; $gtlp.AutoSize = $true; $gtlp.AutoSizeMode = 'GrowAndShrink'
+        [void]$gtlp.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+        [void]$gtlp.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+        $gIntro = New-Object System.Windows.Forms.Label; $gIntro.Text = 'Invite an external person as a B2B guest. They get a redemption link to access your tenant -- this is not a normal account.'
+        $gIntro.AutoSize = $true; $gIntro.MaximumSize = New-Object System.Drawing.Size(620, 0); $gIntro.ForeColor = $t.Text; $gIntro.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 10)
+        $gEmailLbl = New-Object System.Windows.Forms.Label; $gEmailLbl.Text = 'Email address *:'; $gEmailLbl.AutoSize = $true; $gEmailLbl.Font = $t.FontBold; $gEmailLbl.ForeColor = $t.Text; $gEmailLbl.Anchor = 'Left'; $gEmailLbl.Margin = New-Object System.Windows.Forms.Padding(3, 8, 10, 3)
+        $gEmail = New-Object System.Windows.Forms.TextBox; $gEmail.Anchor = 'Left,Right'; $gEmail.Width = 320; $gEmail.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 4)
+        $gNameLbl = New-Object System.Windows.Forms.Label; $gNameLbl.Text = 'Display Name:'; $gNameLbl.AutoSize = $true; $gNameLbl.ForeColor = $t.Text; $gNameLbl.Anchor = 'Left'; $gNameLbl.Margin = New-Object System.Windows.Forms.Padding(3, 8, 10, 3)
+        $gName = New-Object System.Windows.Forms.TextBox; $gName.Anchor = 'Left,Right'; $gName.Width = 320; $gName.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 4)
+        $gSend = New-Object System.Windows.Forms.CheckBox; $gSend.Text = 'Send the invitation email now'; $gSend.Checked = $true; $gSend.AutoSize = $true; $gSend.ForeColor = $t.Text; $gSend.Margin = New-Object System.Windows.Forms.Padding(3, 8, 3, 4)
+        $gUrlLbl = New-Object System.Windows.Forms.Label; $gUrlLbl.Text = 'Redirect URL:'; $gUrlLbl.AutoSize = $true; $gUrlLbl.ForeColor = $t.Text; $gUrlLbl.Anchor = 'Left'; $gUrlLbl.Margin = New-Object System.Windows.Forms.Padding(3, 8, 10, 3)
+        $gUrl = New-Object System.Windows.Forms.TextBox; $gUrl.Anchor = 'Left,Right'; $gUrl.Width = 320; $gUrl.Text = 'https://myapplications.microsoft.com'; $gUrl.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 4)
+        $gtlp.Controls.Add($gIntro, 0, 0); $gtlp.SetColumnSpan($gIntro, 2)
+        $gtlp.Controls.Add($gEmailLbl, 0, 1); $gtlp.Controls.Add($gEmail, 1, 1)
+        $gtlp.Controls.Add($gNameLbl, 0, 2); $gtlp.Controls.Add($gName, 1, 2)
+        $gtlp.Controls.Add($gSend, 0, 3); $gtlp.SetColumnSpan($gSend, 2)
+        $gtlp.Controls.Add($gUrlLbl, 0, 4); $gtlp.Controls.Add($gUrl, 1, 4)
+        $guestBox.Controls.Add($gtlp)
+        $layout.Controls.Add($guestBox, 0, 1)
+    }
 
     # --- Actions: Save / Reset (left), Delete (right) --------------------------------------
     $actions = New-Object System.Windows.Forms.TableLayoutPanel
@@ -171,6 +215,8 @@ function New-EntityTab {
         Fields = @{}; Order = (New-Object System.Collections.Generic.List[object])
         SaveBtn = $saveBtn; ResetBtn = $resetBtn; DeleteBtn = $deleteBtn; SettingsBtn = $settingsBtn
         BackupBtn = $backupBtn; RestoreBtn = $restoreBtn
+        TypeMember = $typeMember; TypeGuest = $typeGuest
+        GuestBox = $guestBox; GuestEmail = $gEmail; GuestName = $gName; GuestSend = $gSend; GuestUrl = $gUrl
     }
 
     # --- Wire tab events -------------------------------------------------------------------
@@ -197,6 +243,10 @@ function New-EntityTab {
     $saveBtn.Add_Click({ param($s, $e) Invoke-Save -Tab $s.Tag })
     $resetBtn.Add_Click({ param($s, $e) Set-TabMode -Tab $s.Tag -Mode $script:UI[$s.Tag].Mode })
     $deleteBtn.Add_Click({ param($s, $e) Invoke-Delete -Tab $s.Tag })
+    if ($Tab -eq 'User') {
+        $typeMember.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserAccountType -Type 'Member' } })
+        $typeGuest.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserAccountType -Type 'Guest' } })
+    }
 
     Build-TabForm -Tab $Tab
     return $page
@@ -332,6 +382,20 @@ function Update-NewUserGeneratedFields {
     if ($g.ContainsKey('userPrincipalName')) { Set-AutoField -Field $g['userPrincipalName'] -Value $gen.Alias }
 }
 
+function Set-UserAccountType {
+    <# Toggle the User-New view between Member (the create form) and Guest (the invitation box). #>
+    param([ValidateSet('Member', 'Guest')][string]$Type)
+    $ctx = $script:UI.User
+    if (-not $ctx -or -not $ctx.GuestBox) { return }
+    $isGuest = ($Type -eq 'Guest')
+    $ctx.ScrollHost.Visible = -not $isGuest
+    $ctx.GuestBox.Visible = $isGuest
+    $ctx.SaveBtn.Text = if ($isGuest) { '&Send invite' } else { '&Create user' }
+    # Backup/Restore apply to the member-create form, not to a guest invite.
+    $ctx.BackupBtn.Visible = -not $isGuest
+    $ctx.RestoreBtn.Visible = -not $isGuest
+}
+
 function Set-TabMode {
     param([ValidateSet('User', 'Group')][string]$Tab, [ValidateSet('New', 'Edit')][string]$Mode)
     $ctx = $script:UI[$Tab]
@@ -341,6 +405,14 @@ function Set-TabMode {
     $ctx.DeleteBtn.Visible = ($Mode -eq 'Edit')
     $ctx.TargetLabel.Text = ''
     if ($Tab -eq 'User') { $script:State.SelectedUser = $null } else { $script:State.SelectedGroup = $null }
+    # Member/Guest toggle only applies to creating a User; show it in New mode, and always return to
+    # the Member view on a mode switch.
+    if ($Tab -eq 'User' -and $ctx.TypeMember) {
+        $ctx.TypeMember.Visible = ($Mode -eq 'New')
+        $ctx.TypeGuest.Visible = ($Mode -eq 'New')
+        $ctx.TypeMember.Checked = $true
+        Set-UserAccountType -Type 'Member'
+    }
     $script:UI.ErrorProvider.Clear()
     Build-TabForm -Tab $Tab
 }
@@ -807,16 +879,42 @@ function Build-GroupPayload {
 function Invoke-Save {
     param([ValidateSet('User', 'Group')][string]$Tab)
     if (-not (Test-GraphConnected)) { [System.Windows.Forms.MessageBox]::Show('Connect first.', 'Not connected', 'OK', 'Information') | Out-Null; return }
-    if (-not (Test-FormValid -Tab $Tab)) { return }
+    $ctx = $script:UI[$Tab]
+    $guestMode = ($Tab -eq 'User' -and $ctx.Mode -eq 'New' -and $ctx.TypeGuest -and $ctx.TypeGuest.Checked)
+    if (-not $guestMode -and -not (Test-FormValid -Tab $Tab)) { return }
     Set-UiBusy $true
     try {
-        if ($Tab -eq 'User') { Invoke-SaveUser } else { Invoke-SaveGroup }
+        if ($guestMode) { Invoke-SendGuestInvite }
+        elseif ($Tab -eq 'User') { Invoke-SaveUser }
+        else { Invoke-SaveGroup }
     } catch {
         Set-Progress 'Save failed.'
         [System.Windows.Forms.MessageBox]::Show("Save failed:`n$($_.Exception.Message)", 'Error', 'OK', 'Error') | Out-Null
     } finally {
         Set-UiBusy $false
     }
+}
+
+function Invoke-SendGuestInvite {
+    <# Validate + send a B2B guest invitation from the User-New "Guest" panel. #>
+    $ctx = $script:UI.User
+    $email = ([string]$ctx.GuestEmail.Text).Trim()
+    $name  = ([string]$ctx.GuestName.Text).Trim()
+    $url   = ([string]$ctx.GuestUrl.Text).Trim()
+    $send  = [bool]$ctx.GuestSend.Checked
+    if (-not $email -or ($email -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$')) {
+        [System.Windows.Forms.MessageBox]::Show('Enter a valid email address for the guest.', 'Email required', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if (-not $url) { $url = 'https://myapplications.microsoft.com' }
+    Set-Progress 'Sending guest invitation...'
+    $inv = Send-GuestInvitation -Email $email -DisplayName $name -RedirectUrl $url -SendEmail $send
+    $redeem = [string](Get-GraphVal $inv 'inviteRedeemUrl')
+    $msg = if ($send) { "Guest invited: $email`n`nAn invitation email with the redemption link was sent." }
+           else       { "Guest invited: $email`n`nNo email was sent. Redemption link:`n$redeem" }
+    Set-Progress "Guest invitation sent to $email."
+    [System.Windows.Forms.MessageBox]::Show($msg, 'Guest invited', 'OK', 'Information') | Out-Null
+    $ctx.GuestEmail.Text = ''; $ctx.GuestName.Text = ''
 }
 
 function Save-SyncedUserToAd {

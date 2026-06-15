@@ -19,6 +19,7 @@ $script:GraphScopes = @(
     'GroupMember.ReadWrite.All'
     'Organization.Read.All'
     'LicenseAssignment.ReadWrite.All'
+    'User.Invite.All'                  # send B2B guest invitations (New-MgInvitation)
 )
 
 function Initialize-GraphModule {

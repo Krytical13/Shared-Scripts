@@ -370,6 +370,22 @@ Assert-That 'New-group form shows type/name/description/members/owners, not read
 }
 Assert-That 'every Exchange attribute builds a control' { $true }
 Assert-That 'Exchange catalog has 5 object types' { (& $mod { $script:Catalog.Exchange.Types.Count }) -eq 5 }
+Assert-That 'main form builds headless, including the guest-invite panel + handles' {
+    & $mod {
+        $script:AppReady = $false
+        $script:Config = New-DefaultConfig
+        $form = New-MainForm
+        $ok = $script:UI.User.GuestBox -and $script:UI.User.TypeMember -and $script:UI.User.TypeGuest -and `
+              $script:UI.User.GuestEmail -and $script:UI.User.GuestUrl -and $script:UI.User.GuestSend
+        $form.Dispose()
+        [bool]$ok
+    }
+}
+Assert-That 'guest invite wired: User.Invite.All scope + Send-GuestInvitation present' {
+    & $mod {
+        ($script:GraphScopes -contains 'User.Invite.All') -and [bool](Get-Command Send-GuestInvitation -ErrorAction SilentlyContinue)
+    }
+}
 
 # Text field read / set / dirty.
 $dirtyResult = & $mod {

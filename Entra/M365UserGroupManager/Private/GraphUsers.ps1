@@ -71,6 +71,28 @@ function Get-UserManagerInfo {
     }
 }
 
+function Send-GuestInvitation {
+    <#
+        Invite an external user as a B2B guest via New-MgInvitation. This is the correct path for
+        guests -- they aren't created with New-MgUser. Optionally emails the redemption link.
+        Returns the invitation object (its InviteRedeemUrl is the link the guest redeems).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Email,
+        [string]$DisplayName,
+        [string]$RedirectUrl = 'https://myapplications.microsoft.com',
+        [bool]$SendEmail = $true
+    )
+    $params = @{
+        InvitedUserEmailAddress = $Email
+        InviteRedirectUrl       = $RedirectUrl
+        SendInvitationMessage   = $SendEmail
+        ErrorAction             = 'Stop'
+    }
+    if ($DisplayName) { $params.InvitedUserDisplayName = $DisplayName }
+    return New-MgInvitation @params
+}
+
 function New-DirectoryUser {
     <# Create a user from a fully-formed Graph body hashtable. Returns the new user. #>
     param([Parameter(Mandatory)][hashtable]$Body)

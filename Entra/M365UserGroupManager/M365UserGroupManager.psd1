@@ -34,6 +34,7 @@
             'Microsoft.Graph.Users.Actions'
             'Microsoft.Graph.Groups'
             'Microsoft.Graph.Identity.DirectoryManagement'
+            'Microsoft.Graph.Identity.SignIns'              # New-MgInvitation (guest invites)
         )
     }
 }
