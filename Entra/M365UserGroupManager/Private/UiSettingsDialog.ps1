@@ -53,41 +53,43 @@ function Show-SettingsDialog {
     $scroll.Controls.Add($flow)
     $root.Controls.Add($scroll, 0, 1)
 
+    # Render each catalog group as a cyan section header (matching the main form's FontSection style)
+    # with its checkboxes indented beneath -- NOT a WinForms GroupBox, whose light etched border and
+    # title don't dark-theme cleanly.
     $checks = New-Object System.Collections.Generic.List[object]
+    $firstGroup = $true
     foreach ($group in (Get-CatalogTab -Tab $Tab)) {
-        $gb = New-Object System.Windows.Forms.GroupBox
-        $gb.Text = $group.Name; $gb.AutoSize = $true; $gb.AutoSizeMode = 'GrowAndShrink'
-        $gb.Margin = New-Object System.Windows.Forms.Padding(6, 6, 6, 2); $gb.Width = 500
-        $inner = New-Object System.Windows.Forms.FlowLayoutPanel
-        $inner.FlowDirection = 'TopDown'; $inner.WrapContents = $false; $inner.AutoSize = $true
-        $inner.AutoSizeMode = 'GrowAndShrink'; $inner.Dock = 'Fill'
-        $inner.Margin = New-Object System.Windows.Forms.Padding(3, 16, 3, 3)
+        $hdr = New-Object System.Windows.Forms.Label
+        $hdr.Text = $group.Name; $hdr.AutoSize = $true; $hdr.UseMnemonic = $false
+        $hdr.Font = $t.FontSection; $hdr.ForeColor = $t.Header
+        $hdr.Margin = New-Object System.Windows.Forms.Padding(6, $(if ($firstGroup) { 4 } else { 16 }), 6, 4)
+        [void]$flow.Controls.Add($hdr); $firstGroup = $false
         foreach ($attr in $group.Attributes) {
             $cb = New-Object System.Windows.Forms.CheckBox
-            $cb.AutoSize = $true; $cb.Tag = $attr
+            $cb.AutoSize = $true; $cb.Tag = $attr; $cb.Margin = New-Object System.Windows.Forms.Padding(20, 1, 6, 1)
             if ($attr.Required -or $attr.RequiredForCreate) {
-                # Required-to-create fields (marked * or auto-generated) are always shown when creating
-                # -- lock them on here so the Settings list reflects that and they can't be unchecked.
-                $cb.Text = $attr.Label + '  (required)'; $cb.Checked = $true; $cb.Enabled = $false
+                # Required-to-create fields (marked * or auto-generated) are always shown when creating.
+                # Lock them ON, but keep them ENABLED + Muted (readable) rather than disabled (which renders
+                # near-illegible grey on dark); a CheckedChanged guard re-checks them if clicked.
+                $cb.Text = $attr.Label + '  (required)'; $cb.Checked = $true; $cb.ForeColor = $t.Muted
+                $cb.Add_CheckedChanged({ if (-not $args[0].Checked) { $args[0].Checked = $true } })
             } else {
                 $cb.Text = $attr.Label; $cb.Checked = ($enabled -contains $attr.Name)
             }
-            [void]$inner.Controls.Add($cb)
+            [void]$flow.Controls.Add($cb)
             [void]$checks.Add($cb)
         }
-        $gb.Controls.Add($inner)
-        [void]$flow.Controls.Add($gb)
     }
 
-    # Skip disabled (required) checkboxes -- they stay locked on.
-    $btnAll.Add_Click({ foreach ($c in $checks) { if ($c.Enabled) { $c.Checked = $true } } }.GetNewClosure())
-    $btnNone.Add_Click({ foreach ($c in $checks) { if ($c.Enabled) { $c.Checked = $false } } }.GetNewClosure())
+    # All/None/Defaults skip the locked "required" checkboxes (identified by their attr Tag).
+    $btnAll.Add_Click({ foreach ($c in $checks) { if (-not ($c.Tag.Required -or $c.Tag.RequiredForCreate)) { $c.Checked = $true } } }.GetNewClosure())
+    $btnNone.Add_Click({ foreach ($c in $checks) { if (-not ($c.Tag.Required -or $c.Tag.RequiredForCreate)) { $c.Checked = $false } } }.GetNewClosure())
     # Compute the defaults OUTSIDE the handler and capture the RESULT: a .GetNewClosure() block
     # loses module affinity on Windows PowerShell 5.1 and can't call module-private functions
     # (Get-DefaultEnabledNames would throw "not recognized" at click time).
     $defaultNames = Get-DefaultEnabledNames -Tab $Tab
     $btnDef.Add_Click({
-        foreach ($c in $checks) { if ($c.Enabled) { $c.Checked = ($defaultNames -contains $c.Tag.Name) } }
+        foreach ($c in $checks) { if (-not ($c.Tag.Required -or $c.Tag.RequiredForCreate)) { $c.Checked = ($defaultNames -contains $c.Tag.Name) } }
     }.GetNewClosure())
 
     # --- Bottom: OK / Cancel ---------------------------------------------------------------
