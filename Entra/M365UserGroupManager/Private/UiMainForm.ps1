@@ -263,6 +263,7 @@ function New-EntityTab {
         BackupBtn = $backupBtn; RestoreBtn = $restoreBtn
         TypePanel = $typePanel; TypeMember = $typeMember; TypeGuest = $typeGuest
         GuestBox = $guestBox; GuestEmail = $gEmail; GuestName = $gName; GuestSend = $gSend; GuestUrl = $gUrl
+        CurrentKind = 'Security'   # Group tab: which kind's view is showing (driven by the GroupType radio / loaded group)
     }
 
     # --- Wire tab events -------------------------------------------------------------------
@@ -378,6 +379,46 @@ function Build-TabForm {
         }
     }
 
+    # New group: typing the Display Name auto-fills the M365 email alias (mailNickname); the alias box
+    # gets a read-only "@<default domain>" suffix (the domain is not selectable via Graph -- it derives
+    # from the tenant default accepted domain). Then apply the reactive kind view for the default radio.
+    if ($Tab -eq 'Group' -and $ctx.Mode -eq 'New') {
+        $dn = $ctx.Fields['displayName']
+        if ($dn -and $dn.Main) {
+            $dn.Main.Add_TextChanged({ Update-NewGroupGeneratedFields })
+        }
+        $aliasF = $ctx.Fields['mailNickname']
+        if ($aliasF -and $aliasF.Cell -and -not $aliasF.Aux) {
+            # Wrap the plain alias TextBox in a 2-col cell so we can append the read-only domain suffix,
+            # without introducing a new Input type. The TextBox stays $field.Main (Read/Set unchanged).
+            # NB: for a Text field $field.Cell IS the textbox, so capture its grid position BEFORE
+            # reparenting it (Controls.Add reparents, which would make GetCellPosition return (-1,-1)
+            # and the composite cell land at the wrong spot -- the layout bug this replaces).
+            $tb = $aliasF.Main
+            $pos = $tlp.GetCellPosition($tb)
+            $colSpan = $tlp.GetColumnSpan($tb)
+            $tlp.Controls.Remove($tb)
+            $cell = New-CellTable -Cols 2 -Rows 1 -Height 30
+            Add-ColumnStyle $cell 'Percent' 100; Add-ColumnStyle $cell 'AutoSize'
+            Add-RowStyle $cell 'Percent' 100
+            $cell.Margin = New-Object System.Windows.Forms.Padding(0)
+            $tb.Dock = 'Fill'; $tb.Anchor = 'Left,Right'
+            $suffix = New-Object System.Windows.Forms.Label
+            $suffix.AutoSize = $true; $suffix.Anchor = 'Left'; $suffix.ForeColor = $t.Muted
+            $suffix.Margin = New-Object System.Windows.Forms.Padding(4, 8, 3, 3)
+            $cell.Controls.Add($tb, 0, 0); $cell.Controls.Add($suffix, 1, 0)
+            $tlp.Controls.Add($cell, $pos.Column, $pos.Row)
+            if ($colSpan -gt 1) { $tlp.SetColumnSpan($cell, $colSpan) }
+            $aliasF.Cell = $cell
+            $aliasF.Aux = $suffix
+            $tb.Add_TextChanged({ Update-NewGroupGeneratedFields })
+        }
+        # Apply the initial kind view (Security is the default radio): hides alias + visibility.
+        $typeF = $ctx.Fields['__groupType']
+        $initialKind = if ($typeF) { Read-FieldValue $typeF } else { 'Security' }
+        Set-GroupKindView -Kind $initialKind
+    }
+
     # License pickers need the tenant SKUs. Only fetch them once the app is ready (i.e. AFTER the
     # user has connected) -- never during initial construction -- so launching the tool makes no
     # Graph call and can't trigger a sign-in prompt before Connect is clicked.
@@ -428,6 +469,20 @@ function Update-NewUserGeneratedFields {
     if ($g.ContainsKey('userPrincipalName')) { Set-AutoField -Field $g['userPrincipalName'] -Value $gen.Alias }
 }
 
+function Update-NewGroupGeneratedFields {
+    <# New-group convenience: derive the M365 email alias (mailNickname) from the Display Name, and keep
+       the read-only "@<default domain>" preview in sync. Auto-fill stops once the operator edits the
+       alias (Set-AutoField). For a Security group the alias box is hidden; the value is regenerated at
+       save time by Build-GroupPayload, so nothing here is wasted. #>
+    $ctx = $script:UI.Group
+    if (-not $ctx -or $ctx.Mode -ne 'New') { return }
+    $g = $ctx.Fields
+    $display = if ($g.ContainsKey('displayName') -and $g['displayName']) { [string](Read-FieldValue $g['displayName']) } else { '' }
+    $alias = Get-GeneratedGroupAlias -DisplayName $display
+    if ($g.ContainsKey('mailNickname')) { Set-AutoField -Field $g['mailNickname'] -Value $alias }
+    Set-GroupAliasDomainPreview
+}
+
 function Set-UserAccountType {
     <# Toggle the User-New view between Member (the create form) and Guest (the invitation box). #>
     param([ValidateSet('Member', 'Guest')][string]$Type)
@@ -440,6 +495,59 @@ function Set-UserAccountType {
     # Backup/Restore apply to the member-create form, not to a guest invite.
     $ctx.BackupBtn.Visible = -not $isGuest
     $ctx.RestoreBtn.Visible = -not $isGuest
+}
+
+function Get-GeneratedGroupAlias {
+    <# Pure: derive a Graph-legal mailNickname from a display name -- lowercase, ASCII letters/digits
+       and . - _ only (everything else stripped), trimmed of leading/trailing dots, capped at 64.
+       Mirrors Get-GeneratedUserNames' alias rule. Graph requires mailNickname for EVERY group, so
+       for a Security group (where the portal hides the alias) the payload builder fills it from here. #>
+    param([string]$DisplayName)
+    $a = ((([string]$DisplayName) -replace '[^A-Za-z0-9.\-_]', '').ToLower()).Trim('.')
+    if ($a.Length -gt 64) { $a = $a.Substring(0, 64) }
+    return $a
+}
+
+function Set-GroupAliasDomainPreview {
+    <# Show the resulting SMTP preview ("alias@<default verified domain>") next to the M365 email-alias
+       box, READ-ONLY. Per the create-group docs the domain is NOT selectable via Graph -- it derives
+       from the tenant's default accepted domain (so we deliberately show a preview, not a misleading
+       editable domain dropdown like the user UPN control). Best-effort: blank if no domain is known yet. #>
+    $ctx = $script:UI.Group
+    $f = $ctx.Fields['mailNickname']
+    if (-not $f -or -not $f.Aux) { return }
+    $alias = [string](Read-FieldValue $f)
+    $dom = Get-DefaultVerifiedDomain
+    $f.Aux.Text = if ($alias -and $dom) { "@$dom" } elseif ($dom) { "@$dom" } else { '' }
+}
+
+function Set-GroupKindView {
+    <#
+        Reactively show/hide + (de)require the kind-specific Group fields for the given kind.
+        - Microsoft365: show mailNickname (editable alias + domain preview) and visibility.
+        - Security:     hide both; mailNickname is auto-generated by Build-GroupPayload, visibility
+                        is an M365-only concept and is never sent.
+        Toggling Visible on each field's Label + Cell is enough: a hidden field's RequiredForCreate is
+        skipped by Test-FormValid via Get-FieldValidationError, which we also gate on AppliesToGroupKind.
+        Used in New mode (driven by the radio) AND in Edit mode (driven by the loaded group's kind).
+    #>
+    param([ValidateSet('Security', 'Microsoft365')][string]$Kind)
+    $ctx = $script:UI.Group
+    if (-not $ctx) { return }
+    $ctx.CurrentKind = $Kind
+    foreach ($field in $ctx.Order) {
+        $applies = $field.Attr.AppliesToGroupKind
+        if (-not $applies) { continue }                 # field applies to both kinds -- leave it
+        $show = ($applies -eq $Kind)
+        if ($field.Label) { $field.Label.Visible = $show }
+        if ($field.Cell)  { $field.Cell.Visible = $show }
+        # Record the requested visibility on the descriptor. Control.Visible reports EFFECTIVE
+        # visibility (always false on a not-yet-shown / overlay-covered form), so the offline harness
+        # asserts this flag instead -- it reflects what the kind view actually decided.
+        $field.KindShown = $show
+    }
+    # Keep displayName driving the alias preview while we're showing the M365 alias.
+    if ($Kind -eq 'Microsoft365') { Set-GroupAliasDomainPreview }
 }
 
 function Set-TabMode {
@@ -852,6 +960,12 @@ function Import-GroupIntoForm {
         Set-FieldBaseline -Field $field
     }
 
+    # Drive the kind-specific view from the loaded group's ACTUAL kind (not a radio -- the type is
+    # locked in Edit): a Security group hides the M365-only email-alias + visibility rows; an M365
+    # group shows them. On an M365 group the email alias stays editable and IS dirty-tracked -- Graph
+    # permits PATCHing mailNickname -- so an edited alias is re-sent normally via the dirty diff.
+    Set-GroupKindView -Kind $(if ($isUnified) { 'Microsoft365' } else { 'Security' })
+
     Set-TabHybridGating -Tab 'Group' -Object $Group
     $ctx.TargetLabel.Text = "Editing: $(Get-GraphVal $Group 'displayName')  ($(Get-GroupTypeLabel -Group $Group))   [$(Get-ObjectSourceLabel $Group)]"
     Set-TabActionState -Tab 'Group'
@@ -960,11 +1074,27 @@ function Build-GroupPayload {
         $a = $field.Attr
         if (-not $a.Writable) { continue }
         if ($a.Input -in 'Person', 'GroupType') { continue }
-        if ($a.Name -eq 'visibility' -and -not $isUnified) { continue }   # M365 groups only
+        # Kind-specific fields (mailNickname, visibility) are only sent for the kind they apply to.
+        # visibility: M365-only (security groups effectively default to Private; HiddenMembership is
+        # M365-only). mailNickname: still required by Graph for a security group, but the operator
+        # never sees/types it -- it's auto-generated from the display name in the safety net below.
+        if ($a.AppliesToGroupKind -and (($a.AppliesToGroupKind -eq 'Microsoft365') -ne $isUnified)) { continue }
         if ($Mode -eq 'Edit' -and -not (Test-FieldDirty $field)) { continue }
         $val = ConvertTo-PayloadValue $field
         if ($Mode -eq 'New' -and ($null -eq $val -or ($val -is [array] -and $val.Count -eq 0))) { continue }
         $body[$a.Name] = $val
+    }
+
+    # mailNickname is REQUIRED by Graph for EVERY group kind (verified: the create-group required-property
+    # table lists it unconditionally), but the form only collects it for Microsoft 365. On New, guarantee
+    # a NON-EMPTY, Graph-legal alias: for a security group (alias hidden) derive it from the display name;
+    # also backfill a blank M365 alias. A display name that's entirely non-ASCII/symbols sanitizes to ''
+    # -- so fall back to a unique 'group-<id>' stub rather than POSTing an empty (illegal) mailNickname.
+    if ($Mode -eq 'New' -and [string]::IsNullOrWhiteSpace([string]$body['mailNickname'])) {
+        $dn = if ($ctx.Fields.ContainsKey('displayName')) { [string](Read-FieldValue $ctx.Fields['displayName']) } else { '' }
+        $alias = Get-GeneratedGroupAlias -DisplayName $dn
+        if ([string]::IsNullOrWhiteSpace($alias)) { $alias = 'group-' + ([guid]::NewGuid().ToString('N').Substring(0, 12)) }
+        $body['mailNickname'] = $alias
     }
     return $body
 }

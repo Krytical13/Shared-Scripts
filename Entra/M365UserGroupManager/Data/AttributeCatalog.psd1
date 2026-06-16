@@ -34,6 +34,15 @@
     #                ShowOnNew set PLUS all Required/RequiredForCreate fields -- a focused create form
     #                (e.g. a new hire). EDIT mode instead shows the Settings-enabled set, so you create
     #                with the essentials and then complete the rest after the auto-switch to Edit.
+    #    AppliesToGroupKind  (Group tab only) restricts a field to ONE group kind: 'Microsoft365' or
+    #                'Security'. The field is still built into the form, but the reactive view
+    #                (Set-GroupKindView) shows/hides + requires it per the selected kind (New) or the
+    #                loaded group's actual kind (Edit). Omitted => applies to BOTH kinds. Used to make
+    #                mailNickname (editable alias) + visibility M365-only -- mirroring the Entra portal,
+    #                where the email/alias field is enabled only for the Microsoft 365 type and
+    #                visibility is a Microsoft-365-only concept. For Security, mailNickname is still
+    #                required by Graph but is AUTO-GENERATED from the display name (Build-GroupPayload),
+    #                not shown.
     #    DefaultShow $true to enable the field by default in the EDIT view (until the user changes Settings).
     #    Choices     literal value list for Input=Choice.
     #    ChoiceSource named dynamic list for Input=Choice: 'Country' (ISO 3166-1 alpha-2).
@@ -158,9 +167,14 @@
             Attributes = @(
                 @{ Name = '__groupType';  Label = 'Group Type';      Input = 'GroupType'; Writable = $true;  Required = $true;  DefaultShow = $true;  Authority = 'Cloud'; Help = 'Security or Microsoft 365; create-time only (the tool only creates cloud groups); cannot be changed after creation' }
                 @{ Name = 'displayName';  Label = 'Display Name';    Input = 'Text';      Writable = $true;  Required = $true;  DefaultShow = $true;  MaxLength = 256 }
-                @{ Name = 'mailNickname'; Label = 'Mail Nickname';   Input = 'Text';      Writable = $true;  Required = $true;  DefaultShow = $true;  MaxLength = 64; Help = 'no spaces; ASCII only' }
+                # Graph requires mailNickname for BOTH kinds, but the portal only EXPOSES it (as the email alias)
+                # for Microsoft 365 groups. So: shown + required-to-create for M365 (editable alias, no domain --
+                # Graph derives the SMTP domain from the tenant's default accepted domain); auto-generated from the
+                # display name and hidden for Security (Build-GroupPayload fills it). RequiredForCreate (not Required)
+                # keeps it unmarked, off the bold/'*' path, and unlocked-but-checked in the Settings dialog.
+                @{ Name = 'mailNickname'; Label = 'Email alias';     Input = 'Text';      Writable = $true;  Required = $false; RequiredForCreate = $true; ShowOnNew = $true; DefaultShow = $true; MaxLength = 64; AppliesToGroupKind = 'Microsoft365'; CharFilter = '[A-Za-z0-9.\-_]'; Help = 'the email alias for a Microsoft 365 group; no spaces, ASCII only. The domain is the tenant default accepted domain (set in Exchange afterward if you need another)' }
                 @{ Name = 'description';  Label = 'Description';     Input = 'Multi';     Writable = $true;  Required = $false; ShowOnNew = $true; DefaultShow = $true }
-                @{ Name = 'visibility';   Label = 'Visibility';      Input = 'Choice';    Writable = $true;  Required = $false; ShowOnNew = $true; DefaultShow = $false; Authority = 'Cloud'; Choices = @('Public', 'Private'); Help = 'Microsoft 365 groups only (cloud concept; has no on-prem AD equivalent)' }
+                @{ Name = 'visibility';   Label = 'Visibility';      Input = 'Choice';    Writable = $true;  Required = $false; ShowOnNew = $true; DefaultShow = $false; Authority = 'Cloud'; AppliesToGroupKind = 'Microsoft365'; Choices = @('Public', 'Private'); Help = 'Microsoft 365 groups only (cloud concept; has no on-prem AD equivalent)' }
                 @{ Name = 'id';           Label = 'Object ID';       Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $false }
                 @{ Name = 'mail';         Label = 'Email';           Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $true }
                 @{ Name = 'groupTypes';   Label = 'Group Types';     Input = 'ReadOnly';  Writable = $false; Required = $false; DefaultShow = $false }

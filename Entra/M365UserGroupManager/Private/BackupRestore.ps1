@@ -201,7 +201,11 @@ function Restore-GroupSnapshot {
     if ($ctx.Mode -eq 'Edit' -and $script:State.SelectedGroup) {
         Import-GroupIntoForm -Group $script:State.SelectedGroup
     } elseif ($ctx.Fields['__groupType']) {
-        Set-GroupTypeField -Field $ctx.Fields['__groupType'] -Type $Snapshot.ObjectType
+        # New-mode clone: select the snapshot's kind and apply its reactive view explicitly (don't rely
+        # on CheckedChanged firing -- it won't if the kind already matches the default radio).
+        $kind = if ($Snapshot.ObjectType -in 'Microsoft365', 'Unified') { 'Microsoft365' } else { 'Security' }
+        Set-GroupTypeField -Field $ctx.Fields['__groupType'] -Type $kind
+        Set-GroupKindView -Kind $kind
     }
     Set-FieldFromSnapshot -Fields $ctx.Fields -Snapshot $Snapshot
 }

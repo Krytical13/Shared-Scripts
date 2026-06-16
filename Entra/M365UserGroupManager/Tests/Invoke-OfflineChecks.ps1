@@ -357,6 +357,122 @@ Assert-That 'New-group form shows type/name/description/members/owners, not read
         ($newSet -notcontains 'id') -and ($newSet -notcontains 'groupTypes')
     }
 }
+Assert-That 'Group catalog: mailNickname is required-to-create (unmarked) + M365-only; visibility M365-only; displayName required for both' {
+    & $mod {
+        $b = @{}; foreach ($a in (Get-CatalogAttributeList -Tab 'Group')) { $b[$a.Name] = $a }
+        (-not $b['mailNickname'].Required) -and $b['mailNickname'].RequiredForCreate -and
+        ($b['mailNickname'].AppliesToGroupKind -eq 'Microsoft365') -and
+        ($b['visibility'].AppliesToGroupKind -eq 'Microsoft365') -and
+        $b['displayName'].Required -and (-not $b['displayName'].AppliesToGroupKind)
+    }
+}
+Assert-That 'Get-GeneratedGroupAlias sanitizes display name to a Graph-legal mailNickname' {
+    & $mod {
+        (Get-GeneratedGroupAlias -DisplayName 'Sales & Marketing Team!') -eq 'salesmarketingteam' -and
+        (Get-GeneratedGroupAlias -DisplayName '  Help.Desk_2024  ')      -eq 'help.desk_2024' -and
+        ((Get-GeneratedGroupAlias -DisplayName ('x' * 80)).Length -le 64)
+    }
+}
+Assert-That 'Build-GroupPayload (New): Security -> mailEnabled=false/securityEnabled=true, NO groupTypes, NO visibility, auto-generated mailNickname, no Team' {
+    & $mod {
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $form = New-MainForm
+        $g = $script:UI.Group
+        Set-GroupTypeField -Field $g.Fields['__groupType'] -Type 'Security'
+        Set-GroupKindView -Kind 'Security'
+        $g.Fields['displayName'].Main.Text = 'Operations Group'
+        # operator never typed an alias (the field is hidden for Security)
+        $body = Build-GroupPayload -Mode 'New'
+        $form.Dispose()
+        ($body.mailEnabled -eq $false) -and ($body.securityEnabled -eq $true) -and
+        (-not $body.ContainsKey('groupTypes')) -and (-not $body.ContainsKey('visibility')) -and
+        (-not $body.ContainsKey('resourceProvisioningOptions')) -and
+        ($body.displayName -eq 'Operations Group') -and ($body.mailNickname -eq 'operationsgroup')
+    }
+}
+Assert-That 'Build-GroupPayload (New): a non-ASCII Security group still gets a NON-EMPTY, Graph-legal mailNickname (no empty-alias 400)' {
+    & $mod {
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $form = New-MainForm
+        $g = $script:UI.Group
+        Set-GroupTypeField -Field $g.Fields['__groupType'] -Type 'Security'; Set-GroupKindView -Kind 'Security'
+        $g.Fields['displayName'].Main.Text = "Pekin Takimi"   # set, then force the all-non-ASCII/symbol case below
+        $g.Fields['displayName'].Main.Text = "!@#"            # sanitizes to '' -> must fall back, not POST empty
+        $body = Build-GroupPayload -Mode 'New'
+        $form.Dispose()
+        $mn = [string]$body['mailNickname']
+        $body.ContainsKey('mailNickname') -and ($mn.Length -gt 0) -and ($mn.Length -le 64) -and ($mn -match '^[A-Za-z0-9.\-_]+$')
+    }
+}
+Assert-That 'Build-GroupPayload (New): Microsoft 365 -> groupTypes=[Unified]/mailEnabled=true/securityEnabled=false, alias kept, visibility allowed' {
+    & $mod {
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $form = New-MainForm
+        $g = $script:UI.Group
+        Set-GroupTypeField -Field $g.Fields['__groupType'] -Type 'Microsoft365'
+        Set-GroupKindView -Kind 'Microsoft365'
+        $g.Fields['displayName'].Main.Text  = 'Library Assist'
+        $g.Fields['mailNickname'].Main.Text = 'library'
+        $g.Fields['visibility'].Main.SelectedItem = 'Private'
+        $body = Build-GroupPayload -Mode 'New'
+        $form.Dispose()
+        (@($body.groupTypes) -contains 'Unified') -and ($body.mailEnabled -eq $true) -and
+        ($body.securityEnabled -eq $false) -and ($body.mailNickname -eq 'library') -and
+        ($body.visibility -eq 'Private') -and (-not $body.ContainsKey('resourceProvisioningOptions'))
+    }
+}
+Assert-That 'Group validation: mailNickname NOT required for a Security group (hidden); required for M365 when blank' {
+    & $mod {
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $form = New-MainForm
+        $g = $script:UI.Group
+        # Security: name set, alias blank + hidden -> the alias does not block create (auto-generated).
+        Set-GroupTypeField -Field $g.Fields['__groupType'] -Type 'Security'; Set-GroupKindView -Kind 'Security'
+        $g.Fields['displayName'].Main.Text = 'Test'
+        $g.Fields['mailNickname'].Main.Text = ''
+        $secAliasErr = Get-FieldValidationError -Field $g.Fields['mailNickname']
+        # M365: everything blank -> the shown alias is required-to-create (RequiredForCreate fires).
+        Set-GroupTypeField -Field $g.Fields['__groupType'] -Type 'Microsoft365'; Set-GroupKindView -Kind 'Microsoft365'
+        $g.Fields['displayName'].Main.Text = ''
+        $g.Fields['mailNickname'].Main.Text = ''
+        $g.Fields['mailNickname'].AutoLast = ''   # operator cleared it; no display name to auto-refill from
+        $m365AliasErr = Get-FieldValidationError -Field $g.Fields['mailNickname']
+        $form.Dispose()
+        ($null -eq $secAliasErr) -and ($null -ne $m365AliasErr)
+    }
+}
+Assert-That 'Group New view reacts to the kind: M365 marks alias+visibility shown, Security marks them hidden' {
+    & $mod {
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $form = New-MainForm
+        $g = $script:UI.Group
+        $g.ModeNew.Checked = $true
+        # Control.Visible reports EFFECTIVE visibility (false on a never-shown / overlay-covered form),
+        # so assert the descriptor's KindShown flag, which records what the kind view actually decided.
+        Set-GroupKindView -Kind 'Microsoft365'
+        $m365 = ($g.CurrentKind -eq 'Microsoft365') -and ($g.Fields['mailNickname'].KindShown) -and ($g.Fields['visibility'].KindShown)
+        Set-GroupKindView -Kind 'Security'
+        $sec = ($g.CurrentKind -eq 'Security') -and (-not $g.Fields['mailNickname'].KindShown) -and (-not $g.Fields['visibility'].KindShown)
+        $form.Dispose()
+        $m365 -and $sec
+    }
+}
+Assert-That 'Group New: the alias composite cell sits in the form grid value column (col 1), not floated to (0,0)' {
+    & $mod {
+        # Regression guard: the alias TextBox is wrapped in a composite cell (alias + read-only domain
+        # suffix). The position MUST be captured before reparenting, or GetCellPosition returns (-1,-1)
+        # and the cell auto-flows to the top-left, scrambling the whole form.
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $script:VerifiedDomains = @(@{ Name = 'contoso.com'; IsDefault = $true })
+        $form = New-MainForm
+        $g = $script:UI.Group
+        $aliasF = $g.Fields['mailNickname']
+        $pos = $g.FormTlp.GetCellPosition($aliasF.Cell)
+        $hasSuffix = [bool]$aliasF.Aux
+        $form.Dispose()
+        $hasSuffix -and ($pos.Column -eq 1) -and ($pos.Row -ge 0)
+    }
+}
 
 # Exchange catalog attributes also build controls.
 & $mod {

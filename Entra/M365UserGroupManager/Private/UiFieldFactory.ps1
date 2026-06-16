@@ -344,6 +344,13 @@ function New-FieldRow {
             $radM365 = New-Object System.Windows.Forms.RadioButton; $radM365.Text = '&Microsoft 365'; $radM365.AutoSize = $true
             $cell.Controls.Add($radSec); $cell.Controls.Add($radM365)
             $field.Main = $radSec; $field.Aux = $radM365; $field.Cell = $cell
+            # Reactively swap the Group-New view when the kind changes (mirrors the User tab's
+            # Member/Guest toggle). New mode only -- Edit locks the type, and the view is driven by
+            # the loaded object's kind in Import-GroupIntoForm. Plain scriptblocks keep module affinity.
+            if ($Mode -eq 'New') {
+                $radSec.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-GroupKindView -Kind 'Security' } })
+                $radM365.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-GroupKindView -Kind 'Microsoft365' } })
+            }
         }
 
         default {
@@ -604,6 +611,15 @@ function Get-FieldValidationError {
     param($Field)
     $a = $Field.Attr
     $v = Read-FieldValue $Field
+
+    # Kind-specific Group fields (mailNickname, visibility) only validate for the kind they apply to.
+    # A hidden field (e.g. mailNickname on a Security group) must NOT trip RequiredForCreate -- the
+    # alias is auto-generated at save time. The current kind lives on the Group tab state; if absent
+    # (e.g. unit-testing a lone field) we fall back to validating, which is the safe default.
+    if ($a.AppliesToGroupKind) {
+        $kind = if ($script:UI -and $script:UI.Group) { $script:UI.Group.CurrentKind } else { $null }
+        if ($kind -and ($a.AppliesToGroupKind -ne $kind)) { return $null }
+    }
 
     # Required (only enforced when creating).
     if ($a.Required -and $Field.Mode -eq 'New') {
