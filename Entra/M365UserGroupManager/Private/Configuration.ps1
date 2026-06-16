@@ -58,9 +58,10 @@ function New-DefaultConfig {
     # Plain hashtable for easy in-memory mutation; serialised to JSON by Save-AppConfig.
     # Accounts: saved sign-ins for quick switching -> @{ Name; TenantId; Upn }.
     @{
-        Accounts = @()
-        Users    = @{ Enabled = (Get-DefaultEnabledNames -Tab 'User') }
-        Groups   = @{ Enabled = (Get-DefaultEnabledNames -Tab 'Group') }
+        Accounts       = @()
+        Users          = @{ Enabled = (Get-DefaultEnabledNames -Tab 'User') }
+        Groups         = @{ Enabled = (Get-DefaultEnabledNames -Tab 'Group') }
+        LastOnPremOuDn = ''   # last OU chosen for an on-prem AD user create (preselected next time)
     }
 }
 

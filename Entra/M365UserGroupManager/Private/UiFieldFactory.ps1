@@ -612,6 +612,10 @@ function Get-FieldValidationError {
     $a = $Field.Attr
     $v = Read-FieldValue $Field
 
+    # On-prem create hides the cloud-only fields (license / usage location) -- they're set in the cloud
+    # after the user syncs, so a hidden field must NOT block create via Required/RequiredForCreate.
+    if ($Field.DestHidden) { return $null }
+
     # Kind-specific Group fields (mailNickname, visibility) only validate for the kind they apply to.
     # A hidden field (e.g. mailNickname on a Security group) must NOT trip RequiredForCreate -- the
     # alias is auto-generated at save time. The current kind lives on the Group tab state; if absent

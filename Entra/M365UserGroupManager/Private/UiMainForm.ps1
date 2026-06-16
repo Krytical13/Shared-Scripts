@@ -258,6 +258,20 @@ function New-EntityTab {
         $typeGuest = New-Object System.Windows.Forms.RadioButton; $typeGuest.Text = '&Guest (invite)'; $typeGuest.AutoSize = $true; $typeGuest.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
         $typePanel.Controls.AddRange(@($typeSep, $typeMember, $typeGuest))
     }
+    # Create destination (User tab only): a cloud user (Entra, New-MgUser) or an on-prem AD user that
+    # syncs up via Entra Connect. Lives as a row at the TOP OF THE FORM (not the header, which has no
+    # room) -- shown only for Member + New + when a writable DC is reachable. Own container (radios
+    # group by parent). Built here; placed in the form host below.
+    $destPanel = $null; $destCloud = $null; $destOnPrem = $null
+    if ($Tab -eq 'User') {
+        $destPanel = New-Object System.Windows.Forms.FlowLayoutPanel
+        $destPanel.AutoSize = $true; $destPanel.AutoSizeMode = 'GrowAndShrink'; $destPanel.FlowDirection = 'LeftToRight'; $destPanel.WrapContents = $false
+        $destPanel.Margin = New-Object System.Windows.Forms.Padding(4, 6, 18, 2); $destPanel.Padding = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
+        $destLbl = New-Object System.Windows.Forms.Label; $destLbl.Text = 'Create in:'; $destLbl.AutoSize = $true; $destLbl.Font = $t.FontBold; $destLbl.Margin = New-Object System.Windows.Forms.Padding(2, 6, 10, 3)
+        $destCloud = New-Object System.Windows.Forms.RadioButton; $destCloud.Text = 'Entra &cloud'; $destCloud.AutoSize = $true; $destCloud.Checked = $true; $destCloud.Margin = New-Object System.Windows.Forms.Padding(3, 5, 10, 3)
+        $destOnPrem = New-Object System.Windows.Forms.RadioButton; $destOnPrem.Text = 'On-&premises AD'; $destOnPrem.AutoSize = $true; $destOnPrem.Margin = New-Object System.Windows.Forms.Padding(3, 5, 8, 3)
+        $destPanel.Controls.AddRange(@($destLbl, $destCloud, $destOnPrem))
+    }
     $selectBtn = New-Object System.Windows.Forms.Button; $selectBtn.Text = "&Select $entityWord..."; $selectBtn.Width = 130; $selectBtn.Height = $t.BtnH; $selectBtn.Visible = $false; $selectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 7, 8, 3)
     Set-SecondaryButtonStyle $selectBtn
     $targetLabel = New-Object System.Windows.Forms.Label; $targetLabel.AutoSize = $true; $targetLabel.Margin = New-Object System.Windows.Forms.Padding(3, 10, 3, 3); $targetLabel.ForeColor = $t.Muted; $targetLabel.Visible = $false
@@ -274,14 +288,40 @@ function New-EntityTab {
     $header.Controls.Add($left, 0, 0); $header.Controls.Add($settingsBtn, 1, 0)
     $layout.Controls.Add($header, 0, 0)
 
-    # --- Form host: scrollable 2-column field grid -----------------------------------------
+    # --- Form host: optional OU picker (on-prem create) above the scrollable field grid ----
     $scroll = New-Object System.Windows.Forms.Panel; $scroll.Dock = 'Fill'; $scroll.AutoScroll = $true
+    $formHost = New-Object System.Windows.Forms.TableLayoutPanel
+    $formHost.Dock = 'Top'; $formHost.AutoSize = $true; $formHost.AutoSizeMode = 'GrowAndShrink'; $formHost.ColumnCount = 1; $formHost.RowCount = 3
+    [void]$formHost.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$formHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))   # destination toggle
+    [void]$formHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))   # OU picker
+    [void]$formHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))   # field grid
+    if ($destPanel) { $formHost.Controls.Add($destPanel, 0, 0) }   # visible by default (New + Member); hidden for Guest/Edit
+
+    # OU picker (User tab only) -- shown only for an on-prem create; populated from the writable DC.
+    $ouPanel = $null; $ouCombo = $null
+    if ($Tab -eq 'User') {
+        $ouPanel = New-Object System.Windows.Forms.TableLayoutPanel
+        $ouPanel.Dock = 'Fill'; $ouPanel.AutoSize = $true; $ouPanel.AutoSizeMode = 'GrowAndShrink'; $ouPanel.ColumnCount = 2; $ouPanel.RowCount = 2; $ouPanel.Visible = $false
+        $ouPanel.BackColor = $t.SurfaceAlt; $ouPanel.Margin = New-Object System.Windows.Forms.Padding(4, 6, 18, 2); $ouPanel.Padding = New-Object System.Windows.Forms.Padding(10, 6, 10, 8)
+        [void]$ouPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+        [void]$ouPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+        $ouLbl = New-Object System.Windows.Forms.Label; $ouLbl.Text = 'Target OU *:'; $ouLbl.AutoSize = $true; $ouLbl.Font = $t.FontBold; $ouLbl.Anchor = 'Left'; $ouLbl.Margin = New-Object System.Windows.Forms.Padding(3, 8, 10, 3)
+        $ouCombo = New-Object System.Windows.Forms.ComboBox; $ouCombo.DropDownStyle = 'DropDownList'; $ouCombo.Anchor = 'Left,Right'; $ouCombo.Width = 440; $ouCombo.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 4)
+        $ouNote = New-Object System.Windows.Forms.Label; $ouNote.Text = "The new user appears in Microsoft 365 only if this OU is within Entra Connect's sync scope. Licenses and usage location are set in the cloud after it syncs."
+        $ouNote.AutoSize = $true; $ouNote.MaximumSize = New-Object System.Drawing.Size(640, 0); $ouNote.ForeColor = $t.Muted; $ouNote.Margin = New-Object System.Windows.Forms.Padding(3, 2, 3, 2)
+        $ouPanel.Controls.Add($ouLbl, 0, 0); $ouPanel.Controls.Add($ouCombo, 1, 0)
+        $ouPanel.Controls.Add($ouNote, 0, 1); $ouPanel.SetColumnSpan($ouNote, 2)
+        $formHost.Controls.Add($ouPanel, 0, 1)
+    }
+
     $formTlp = New-Object System.Windows.Forms.TableLayoutPanel
     $formTlp.ColumnCount = 2; $formTlp.AutoSize = $true; $formTlp.AutoSizeMode = 'GrowAndShrink'; $formTlp.Dock = 'Top'
     $formTlp.GrowStyle = 'AddRows'; $formTlp.Padding = New-Object System.Windows.Forms.Padding(4, 6, 18, 6)
     [void]$formTlp.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
     [void]$formTlp.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-    $scroll.Controls.Add($formTlp)
+    $formHost.Controls.Add($formTlp, 0, 2)
+    $scroll.Controls.Add($formHost)
     $layout.Controls.Add($scroll, 0, 1)
 
     # --- Guest-invite panel (User tab only): a distinct bordered, tinted box shown when "Guest" is
@@ -376,6 +416,8 @@ function New-EntityTab {
         BackupBtn = $backupBtn; RestoreBtn = $restoreBtn
         TypePanel = $typePanel; TypeMember = $typeMember; TypeGuest = $typeGuest
         GuestBox = $guestBox; GuestEmail = $gEmail; GuestName = $gName; GuestSend = $gSend; GuestUrl = $gUrl
+        DestPanel = $destPanel; DestCloud = $destCloud; DestOnPrem = $destOnPrem
+        OuPanel = $ouPanel; OuCombo = $ouCombo
         CurrentKind = 'Security'   # Group tab: which kind's view is showing (driven by the GroupType radio / loaded group)
     }
 
@@ -406,9 +448,13 @@ function New-EntityTab {
     if ($Tab -eq 'User') {
         $typeMember.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserAccountType -Type 'Member' } })
         $typeGuest.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserAccountType -Type 'Guest' } })
+        $destCloud.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserCreateDestination -Destination 'Cloud' } })
+        $destOnPrem.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserCreateDestination -Destination 'OnPrem' } })
     }
 
     Build-TabForm -Tab $Tab
+    # Initialize the create-destination view (User): On-prem disabled until connected; cloud fields shown.
+    if ($Tab -eq 'User') { Set-UserCreateDestination -Destination 'Cloud' }
     return $page
 }
 
@@ -605,10 +651,86 @@ function Set-UserAccountType {
     $isGuest = ($Type -eq 'Guest')
     $ctx.ScrollHost.Visible = -not $isGuest
     $ctx.GuestBox.Visible = $isGuest
-    $ctx.SaveBtn.Text = if ($isGuest) { '&Send invite' } else { '&Create user' }
     # Backup/Restore apply to the member-create form, not to a guest invite.
     $ctx.BackupBtn.Visible = -not $isGuest
     $ctx.RestoreBtn.Visible = -not $isGuest
+    # "Create in: cloud / on-prem" applies to a Member only (Guest is always a cloud B2B invite).
+    if ($ctx.DestPanel) {
+        $ctx.DestPanel.Visible = (-not $isGuest)
+        if ($isGuest) {
+            if ($ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
+            $ctx.SaveBtn.Text = '&Send invite'
+        } else {
+            # Re-apply the destination view (sets Save text + OU picker + cloud-field gating, re-checking
+            # AD reachability). Drives off the radio so a previously-chosen On-prem persists across toggles.
+            Set-UserCreateDestination -Destination $(if ($ctx.DestOnPrem -and $ctx.DestOnPrem.Checked) { 'OnPrem' } else { 'Cloud' })
+        }
+    } else {
+        $ctx.SaveBtn.Text = if ($isGuest) { '&Send invite' } else { '&Create user' }
+    }
+}
+
+function Initialize-OuPicker {
+    <# Populate the on-prem OU dropdown from the writable DC: the default Users container first, then the
+       enumerated OUs; preselect the persisted last-used OU if it still exists. If nothing comes back
+       (DC dropped / no OUs), disable on-prem and fall back to Cloud rather than offering an empty list. #>
+    $ctx = $script:UI.User
+    if (-not $ctx -or -not $ctx.OuCombo) { return }
+    $cap = Get-AdWriteCapability
+    if (-not ($cap -and $cap.Available)) { return }
+    $items = New-Object System.Collections.Generic.List[object]
+    $def = Get-AdDefaultUserPath -Dc $cap.Dc
+    if ($def) { [void]$items.Add([pscustomobject]@{ Display = "Users (default container) -- $def"; Dn = $def }) }
+    foreach ($ou in (Get-AdOrganizationalUnitList -Dc $cap.Dc)) { [void]$items.Add([pscustomobject]@{ Display = $ou.DistinguishedName; Dn = $ou.DistinguishedName }) }
+    if ($items.Count -eq 0) {
+        $ctx.DestOnPrem.Enabled = $false; $ctx.DestCloud.Checked = $true
+        [System.Windows.Forms.MessageBox]::Show('No organizational units could be read from Active Directory, so an on-prem create is not available right now.', 'On-premises AD', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $ctx.OuCombo.Items.Clear()
+    foreach ($i in $items) { [void]$ctx.OuCombo.Items.Add($i) }
+    $ctx.OuCombo.DisplayMember = 'Display'; $ctx.OuCombo.ValueMember = 'Dn'
+    $last = [string]$script:Config.LastOnPremOuDn
+    $idx = 0
+    if ($last) { for ($n = 0; $n -lt $items.Count; $n++) { if ($items[$n].Dn -eq $last) { $idx = $n; break } } }
+    $ctx.OuCombo.SelectedIndex = $idx
+}
+
+function Set-UserCreateDestination {
+    <#
+        New-user Member: route the create to Entra cloud (New-MgUser) or on-premises AD (New-AdUserAccount,
+        which Entra Connect then syncs up). On-prem reveals the OU picker and HIDES the cloud-only fields
+        (license / usage location) -- those can't be set until the account exists in Entra. The On-prem
+        option is gated on a reachable writable DC (the same Get-AdWriteCapability gate the edit path uses).
+    #>
+    param([ValidateSet('Cloud', 'OnPrem')][string]$Destination)
+    $ctx = $script:UI.User
+    if (-not $ctx -or -not $ctx.DestPanel) { return }
+
+    $cap = if (Test-GraphConnected) { Get-AdWriteCapability } else { $null }
+    $adOk = [bool]($cap -and $cap.Available)
+    $ctx.DestOnPrem.Enabled = $adOk
+    $reason = if ($adOk) { 'Create the user in on-premises AD; it syncs to Entra on the next directory sync.' }
+              elseif ($cap) { $cap.Reason } else { 'Connect first to check on-premises availability.' }
+    $script:UI.Tooltip.SetToolTip($ctx.DestOnPrem, $reason)
+    if ($Destination -eq 'OnPrem' -and -not $adOk) { $ctx.DestCloud.Checked = $true; return }  # CheckedChanged re-enters as Cloud
+
+    $onPrem = ($Destination -eq 'OnPrem')
+    $ctx.CurrentDest = $Destination
+    if ($ctx.OuPanel) {
+        $ctx.OuPanel.Visible = $onPrem
+        if ($onPrem -and $ctx.OuCombo.Items.Count -eq 0) { Initialize-OuPicker }
+    }
+    # Hide cloud-only fields under on-prem (they're set in the cloud after the user syncs). DestHidden
+    # records the decision so Get-FieldValidationError skips them and the offline harness can assert it.
+    foreach ($field in $ctx.Order) {
+        if ((Resolve-FieldAuthority $field.Attr) -ne 'Cloud') { continue }
+        $hide = $onPrem
+        if ($field.Label) { $field.Label.Visible = -not $hide }
+        if ($field.Cell)  { $field.Cell.Visible = -not $hide }
+        $field.DestHidden = $hide
+    }
+    $ctx.SaveBtn.Text = if ($onPrem) { '&Create in AD' } else { '&Create user' }
 }
 
 function Get-GeneratedGroupAlias {
@@ -673,10 +795,15 @@ function Set-TabMode {
     $ctx.DeleteBtn.Visible = ($Mode -eq 'Edit')
     $ctx.TargetLabel.Text = ''
     if ($Tab -eq 'User') { $script:State.SelectedUser = $null } else { $script:State.SelectedGroup = $null }
-    # Member/Guest toggle only applies to creating a User; show it in New mode, and always return to
-    # the Member view on a mode switch.
+    # Member/Guest + Create-in (cloud/on-prem) only apply to creating a User; show them in New mode, and
+    # always return to Member + Cloud on a mode switch (create-destination is a create-time concept).
     if ($Tab -eq 'User' -and $ctx.TypePanel) {
         $ctx.TypePanel.Visible = ($Mode -eq 'New')
+        if ($ctx.DestPanel) {
+            $ctx.DestPanel.Visible = ($Mode -eq 'New')
+            if ($ctx.DestCloud) { $ctx.DestCloud.Checked = $true }
+            if ($ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
+        }
         $ctx.TypeMember.Checked = $true
         Set-UserAccountType -Type 'Member'
     }
@@ -1348,6 +1475,13 @@ function Invoke-SaveUser {
     $mgrField = $ctx.Fields['manager']
     $licField = $ctx.Fields['assignedLicenses']
 
+    # On-prem create routes to AD BEFORE the cloud license/usageLocation guard below -- those fields are
+    # hidden (and irrelevant) for an on-prem create, and the guard reads them visibility-independently.
+    if ($mode -eq 'New' -and $ctx.DestOnPrem -and $ctx.DestOnPrem.Checked) {
+        Invoke-CreateUserInAd
+        return
+    }
+
     # Guard: assigning a license requires usageLocation.
     if ($licField) {
         $selectedSkus = @(Read-FieldValue $licField)
@@ -1433,6 +1567,93 @@ function Invoke-SaveUser {
     if ($warnings.Count) { $msg += "`n`nNotes:`n  " + ($warnings -join "`n  ") }
     Set-Progress "Saved changes to $(Get-GraphVal $user 'userPrincipalName')."
     [System.Windows.Forms.MessageBox]::Show($msg, 'Saved', 'OK', 'Information') | Out-Null
+}
+
+function Invoke-CreateUserInAd {
+    <#
+        Create the new user in on-premises AD (it syncs to Entra via Entra Connect). Runs inside
+        Invoke-Save's Set-UiBusy + try/catch, so exceptions (incl. the New-AdUserAccount "created but
+        disabled -- password rejected" message) surface through that. Licenses / usage location are NOT
+        set here -- they are cloud properties set in Edit after the account syncs.
+    #>
+    $ctx = $script:UI.User
+    $cap = Get-AdWriteCapability
+    if (-not ($cap -and $cap.Available)) {
+        [System.Windows.Forms.MessageBox]::Show("On-premises Active Directory isn't available: $(if ($cap) { $cap.Reason } else { 'not connected' }).", 'On-premises AD', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $dc = $cap.Dc
+
+    $display = [string](Read-FieldValue $ctx.Fields['displayName'])
+    $upn     = [string](Read-FieldValue $ctx.Fields['userPrincipalName'])
+    $alias   = [string](Read-FieldValue $ctx.Fields['mailNickname'])
+    if (-not $display -or -not $upn) {
+        [System.Windows.Forms.MessageBox]::Show('First and last name (display name) and the User Principal Name are required.', 'Missing details', 'OK', 'Warning') | Out-Null
+        return
+    }
+
+    # sAMAccountName: derive from the alias, validate (<=20 chars, legal), and check uniqueness on the DC.
+    $sam = Get-AdSamAccountName -Alias $alias
+    if (-not (Test-AdSamAccountNameValid -Sam $sam)) {
+        [System.Windows.Forms.MessageBox]::Show("Can't derive a valid account name (sAMAccountName: <=20 characters, no \ / [ ] : ; | = , + * ? < > `") from the alias '$alias'. Edit the Mail Nickname (alias) and try again.", 'Invalid account name', 'OK', 'Warning') | Out-Null
+        return
+    }
+    $inUse = Test-AdSamInUse -Sam $sam -Dc $dc
+    if ($inUse -eq $true) {
+        [System.Windows.Forms.MessageBox]::Show("An account named '$sam' already exists in Active Directory. Choose a different Mail Nickname (alias).", 'Account name in use', 'OK', 'Warning') | Out-Null
+        return
+    }
+    # ($inUse -eq $null) => the uniqueness check couldn't run (AD blip); proceed and let New-ADUser decide.
+
+    $ouDn = if ($ctx.OuCombo -and $ctx.OuCombo.SelectedItem) { [string]$ctx.OuCombo.SelectedItem.Dn } else { '' }
+    if (-not $ouDn) {
+        [System.Windows.Forms.MessageBox]::Show('Choose a target OU for the new user.', 'OU required', 'OK', 'Warning') | Out-Null
+        return
+    }
+
+    # Gather the on-prem-mastered scalar fields (non-empty) -> New-ADUser native params + OtherAttributes.
+    $changes = New-Object System.Collections.Generic.List[object]
+    foreach ($field in $ctx.Order) {
+        $a = $field.Attr
+        if ($a.Input -in 'Person', 'License', 'Password', 'Bool', 'ReadOnly', 'GroupType', 'Date') { continue }
+        if ((Resolve-FieldAuthority $a) -ne 'OnPrem') { continue }
+        $v = Read-FieldValue $field
+        if ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)) { continue }
+        [void]$changes.Add(@{ Name = $a.Name; Value = $v })
+    }
+    $split = ConvertTo-NewAdUserParams -Changes $changes.ToArray()
+
+    $pw = Read-FieldValue $ctx.Fields['passwordProfile']
+    $aeField = $ctx.Fields['accountEnabled']
+    $enabled = if ($aeField) { [bool](Read-FieldValue $aeField) } else { $true }
+
+    Set-Progress "Creating $upn in Active Directory..."
+    $created = New-AdUserAccount -Dc $dc -Path $ouDn -Name $display -SamAccountName $sam -UserPrincipalName $upn `
+        -Password $pw.Password -ForceChangeAtLogon ([bool]$pw.Force) -Enabled $enabled `
+        -NativeParams $split.NativeParams -OtherAttributes $split.OtherAttributes
+
+    # Manager: resolve from the PICKED PERSON by UPN -- not Read-FieldValue (which returns a cloud Id).
+    $warnings = New-Object System.Collections.Generic.List[string]
+    $mgrField = $ctx.Fields['manager']
+    if ($mgrField) {
+        $person = $mgrField.People | Select-Object -First 1
+        if ($person) {
+            $ok = Set-AdUserManagerFromPerson -AdUser $created -Dc $dc -Person $person
+            if (-not $ok) { [void]$warnings.Add("Manager '$($person.DisplayName)' wasn't found in AD by UPN; manager not set.") }
+        }
+    }
+
+    # Remember the chosen OU for next time.
+    $script:Config.LastOnPremOuDn = $ouDn
+    try { Save-AppConfig -Config $script:Config } catch { }
+
+    $msg = "User created in Active Directory:`n$upn`nin $ouDn`n`nIt will appear in Microsoft 365 after the next Microsoft Entra Connect sync (typically within ~30 minutes). Licenses and Usage Location are cloud properties -- set them on this user in Edit mode once it has synced."
+    if ($warnings.Count) { $msg += "`n`nNotes:`n  " + ($warnings -join "`n  ") }
+    [System.Windows.Forms.MessageBox]::Show($msg, 'User created in AD', 'OK', 'Information') | Out-Null
+    Set-Progress "Created $upn in Active Directory -- it will sync to Entra shortly."
+
+    # The object doesn't exist in Entra yet, so do NOT switch to Edit/reload. Reset to a fresh New form.
+    Set-TabMode -Tab 'User' -Mode 'New'
 }
 
 function Invoke-SaveGroup {

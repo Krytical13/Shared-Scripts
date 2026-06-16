@@ -146,8 +146,9 @@ Assert-That 'attribute Names are unique within each tab' {
 
 Write-Host "`n== Config ==" -ForegroundColor Cyan
 $cfg = & $mod { New-DefaultConfig }
-Assert-That 'default config has accounts list + enabled sets' {
-    ($null -ne $cfg.Accounts) -and ($cfg.Users.Enabled.Count -gt 0) -and ($cfg.Groups.Enabled.Count -gt 0)
+Assert-That 'default config has accounts list + enabled sets + LastOnPremOuDn' {
+    ($null -ne $cfg.Accounts) -and ($cfg.Users.Enabled.Count -gt 0) -and ($cfg.Groups.Enabled.Count -gt 0) -and
+    ($cfg.ContainsKey('LastOnPremOuDn'))
 }
 Assert-That 'config JSON round-trips' {
     $json = $cfg | ConvertTo-Json -Depth 6
@@ -702,6 +703,18 @@ $valid = & $mod {
 }
 Assert-That 'invalid UPN is rejected' { $null -ne $valid.Bad }
 Assert-That 'valid UPN passes'        { $null -eq $valid.Good }
+Assert-That 'on-prem create: a DestHidden cloud-only field is skipped by validation (no Required block)' {
+    & $mod {
+        $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
+        $tt = New-Object System.Windows.Forms.ToolTip
+        # A required cloud-only field that's blank normally errors; once DestHidden (on-prem hides it), skipped.
+        $f = New-FieldRow -Attr @{ Name = 'usageLocation'; Label = 'Usage Location'; Input = 'Choice'; Choices = @('US'); Required = $true } -Mode 'New' -Tlp $tlp -Tooltip $tt
+        $before = Get-FieldValidationError -Field $f
+        $f.DestHidden = $true
+        $after = Get-FieldValidationError -Field $f
+        ($null -ne $before) -and ($null -eq $after)
+    }
+}
 Assert-That "SyncState ReadOnly field shows 'cloud-only' for null and 'synced' for true (not blank)" {
     & $mod {
         $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
@@ -730,6 +743,12 @@ Assert-That 'sidebar nav hosts Users, Groups and Exchange pages' {
         ($script:UI.NavButtons.Count -eq 3) -and
         [bool]$script:UI.User.Page -and [bool]$script:UI.Group.Page -and [bool]$script:UI.Exchange.Page -and
         ($script:UI.NavButtons['Exchange'].Tag -eq 'Exchange')
+    }
+}
+Assert-That 'User New form has the Create-in (cloud/on-prem) toggle + OU picker controls (cloud default)' {
+    & $mod {
+        $u = $script:UI.User
+        [bool]$u.DestPanel -and [bool]$u.DestCloud -and [bool]$u.DestOnPrem -and [bool]$u.OuPanel -and [bool]$u.OuCombo -and $u.DestCloud.Checked
     }
 }
 Assert-That 'Exchange tab starts gated (not connected, management panel hidden)' {
