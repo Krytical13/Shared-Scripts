@@ -57,9 +57,9 @@ function New-MainForm {
     $cap.Text = 'MAIN'; $cap.Dock = 'Fill'; $cap.TextAlign = 'BottomLeft'; $cap.ForeColor = $t.Muted; $cap.Font = $t.FontNavHdr
     $cap.Padding = New-Object System.Windows.Forms.Padding(18, 0, 8, 4)
 
-    $navUser  = New-NavItem -Key 'User'     -Text 'Users'
-    $navGroup = New-NavItem -Key 'Group'    -Text 'Groups'
-    $navExch  = New-NavItem -Key 'Exchange' -Text 'Exchange'
+    $navUser  = New-NavItem -Key 'User'     -Text 'Users'    -Glyph ([char]0xE77B)   # Contact
+    $navGroup = New-NavItem -Key 'Group'    -Text 'Groups'   -Glyph ([char]0xE716)   # People
+    $navExch  = New-NavItem -Key 'Exchange' -Text 'Exchange' -Glyph ([char]0xE715)   # Mail
 
     # Connection block, pinned to the sidebar bottom.
     $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
@@ -122,6 +122,7 @@ function New-MainForm {
         NavPanel = $nav; PageHost = $pageHost; HeaderTitle = $hdrTitle; CurrentPage = 'User'
         NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button }
         NavStrips  = @{ User = $navUser.Strip;  Group = $navGroup.Strip;  Exchange = $navExch.Strip }
+        NavIcons   = @{ User = $navUser.Icon;   Group = $navGroup.Icon;   Exchange = $navExch.Icon }
         User = $null; Group = $null; Exchange = $null
     }
 
@@ -147,15 +148,17 @@ function New-MainForm {
     # On open, let the user choose which saved account to connect to (when more than one) instead of
     # silently adopting the last/persisted session. Plain scriptblock keeps module affinity.
     $form.Add_Shown({ Invoke-StartupConnect })
+    $form.Add_Shown({ Set-DarkScrollbars -Root $script:UI.Form })   # native scrollbars need a created handle
 
     Set-ControlTheme -Root $form   # dark-theme the input controls (text/combo/list) that don't inherit it
     return $form
 }
 
 function New-NavItem {
-    <# A left-sidebar nav row: a 3px accent strip + a full-width flat button. Returns @{ Row; Button;
-       Strip } so Select-NavPage can toggle the selected look. The button's Tag is the page key. #>
-    param([string]$Key, [string]$Text)
+    <# A left-sidebar nav row: a 3px accent strip + an optional Fluent icon + a full-width flat button.
+       Returns @{ Row; Button; Strip; Icon } so Select-NavPage can toggle the selected look. Tag = page key.
+       $Glyph is a Segoe MDL2 Assets codepoint; the icon is omitted (text-only) if that font isn't installed. #>
+    param([string]$Key, [string]$Text, [string]$Glyph)
     $t = Get-Theme
     $row = New-Object System.Windows.Forms.Panel; $row.Dock = 'Fill'; $row.BackColor = $t.NavBg; $row.Margin = New-Object System.Windows.Forms.Padding(0)
     $strip = New-Object System.Windows.Forms.Panel; $strip.Dock = 'Left'; $strip.Width = 3; $strip.BackColor = $t.NavBg
@@ -163,23 +166,35 @@ function New-NavItem {
     $btn.Dock = 'Fill'; $btn.Text = $Text; $btn.Tag = $Key; $btn.FlatStyle = 'Flat'; $btn.TextAlign = 'MiddleLeft'
     $btn.Font = $t.FontNav; $btn.ForeColor = $t.Muted; $btn.BackColor = $t.NavBg
     $btn.FlatAppearance.BorderSize = 0; $btn.FlatAppearance.MouseOverBackColor = $t.NavSelBg
-    $btn.Padding = New-Object System.Windows.Forms.Padding(16, 0, 0, 0); $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
-    $row.Controls.Add($btn); $row.Controls.Add($strip)
-    return @{ Row = $row; Button = $btn; Strip = $strip }
+    $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $icon = $null
+    if ($t.FontIcon -and $Glyph) {
+        $icon = New-Object System.Windows.Forms.Label
+        $icon.Dock = 'Left'; $icon.Width = 30; $icon.TextAlign = 'MiddleCenter'; $icon.Font = $t.FontIcon
+        $icon.Text = $Glyph; $icon.ForeColor = $t.Muted; $icon.BackColor = $t.NavBg
+        $btn.Padding = New-Object System.Windows.Forms.Padding(6, 0, 0, 0)
+        $row.Controls.Add($btn); $row.Controls.Add($icon); $row.Controls.Add($strip)
+    } else {
+        $btn.Padding = New-Object System.Windows.Forms.Padding(16, 0, 0, 0)
+        $row.Controls.Add($btn); $row.Controls.Add($strip)
+    }
+    return @{ Row = $row; Button = $btn; Strip = $strip; Icon = $icon }
 }
 
 function Set-NavItemSelected {
-    <# Apply the selected / unselected look to a sidebar nav row (fill + accent strip + text weight). #>
+    <# Apply the selected / unselected look to a sidebar nav row (fill + accent strip + icon + text weight). #>
     param([string]$Key, [bool]$Selected)
     $t = Get-Theme
-    $btn = $script:UI.NavButtons[$Key]; $strip = $script:UI.NavStrips[$Key]
+    $btn = $script:UI.NavButtons[$Key]; $strip = $script:UI.NavStrips[$Key]; $icon = $script:UI.NavIcons[$Key]
     if (-not $btn) { return }
     if ($Selected) {
         $btn.BackColor = $t.NavSelBg; $btn.ForeColor = $t.Text; $btn.Font = $t.FontMedium
         $strip.BackColor = $t.Brand
+        if ($icon) { $icon.BackColor = $t.NavSelBg; $icon.ForeColor = $t.Brand }
     } else {
         $btn.BackColor = $t.NavBg; $btn.ForeColor = $t.Muted; $btn.Font = $t.FontNav
         $strip.BackColor = $t.NavBg
+        if ($icon) { $icon.BackColor = $t.NavBg; $icon.ForeColor = $t.Muted }
     }
 }
 
@@ -528,7 +543,8 @@ function Build-TabForm {
     }
 
     $tlp.ResumeLayout()
-    Set-ControlTheme -Root $tlp   # dark-theme the freshly (re)built field controls
+    Set-ControlTheme -Root $tlp     # dark-theme the freshly (re)built field controls
+    Set-DarkScrollbars -Root $tlp   # + their scrollbars (e.g. multiline Description)
     $ctx.SaveBtn.Text = if ($ctx.Mode -eq 'New') { "&Create $(if ($Tab -eq 'User') { 'user' } else { 'group' })" } else { '&Save changes' }
     Set-TabActionState -Tab $Tab
 }

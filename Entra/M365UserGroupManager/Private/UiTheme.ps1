@@ -57,6 +57,14 @@ function Get-Theme {
             FontNav     = New-Object System.Drawing.Font('Segoe UI', 10)           # sidebar nav items
             FontNavHdr  = New-Object System.Drawing.Font('Segoe UI', 7.5, [System.Drawing.FontStyle]::Bold) # sidebar section captions
         }
+        # Icon font for sidebar glyphs -- Segoe MDL2 Assets (Win10+) / Fluent Icons. Only set it if the
+        # font is actually installed, so on a host without it we degrade to text-only nav (no tofu boxes).
+        $script:Theme.FontIcon = $null
+        try {
+            if ([System.Drawing.FontFamily]::Families.Name -contains 'Segoe MDL2 Assets') {
+                $script:Theme.FontIcon = New-Object System.Drawing.Font('Segoe MDL2 Assets', 11)
+            }
+        } catch { }
     }
     return $script:Theme
 }
@@ -146,6 +154,7 @@ function Set-DialogTheme {
     $Form.ForeColor = $t.Text
     Set-ControlTheme -Root $Form
     Set-DialogButtonStyle -Root $Form
+    $Form.Add_Shown({ Set-DarkScrollbars -Root $args[0] })   # dark scrollbars once handles exist
 }
 
 function Set-DialogButtonStyle {
@@ -155,6 +164,34 @@ function Set-DialogButtonStyle {
     foreach ($c in $Root.Controls) {
         if ($c -is [System.Windows.Forms.Button]) { Set-SecondaryButtonStyle $c }
         if ($c.HasChildren) { Set-DialogButtonStyle -Root $c }
+    }
+}
+
+function Set-DarkScrollbars {
+    <#
+        Darken native WinForms scrollbars (on AutoScroll panels, multiline TextBoxes, ListBoxes) to
+        match the dark theme. WinForms has NO managed way to recolor native scrollbars, so this uses
+        the standard Windows theming API uxtheme!SetWindowTheme(hwnd, "DarkMode_Explorer", null) --
+        the documented mechanism Win10 1809+/Win11 use for dark scrollbars. SECURITY NOTE: this is the
+        ONLY P/Invoke in the tool; it passes no data anywhere, only re-themes the control's own
+        scrollbars, and silently no-ops if the API isn't available (older Windows / locked-down host).
+        Applied only to scroll-bearing control types to avoid touching other chrome.
+    #>
+    param([System.Windows.Forms.Control]$Root)
+    if (-not $Root) { return }
+    if (-not ('M365UGM.NativeTheme' -as [type])) {
+        try {
+            Add-Type -Namespace 'M365UGM' -Name 'NativeTheme' -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
+public static extern int SetWindowTheme(System.IntPtr hWnd, string pszSubAppName, string pszSubIdList);
+'@ -ErrorAction Stop
+        } catch { return }   # interop unavailable -> keep native (light) scrollbars, no error
+    }
+    foreach ($c in $Root.Controls) {
+        if ($c.GetType().Name -in 'Panel', 'TextBox', 'RichTextBox', 'ListBox', 'CheckedListBox', 'ListView') {
+            try { [void][M365UGM.NativeTheme]::SetWindowTheme($c.Handle, 'DarkMode_Explorer', $null) } catch { }
+        }
+        if ($c.HasChildren) { Set-DarkScrollbars -Root $c }
     }
 }
 
