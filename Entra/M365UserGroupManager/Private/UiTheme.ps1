@@ -135,6 +135,29 @@ function Set-ControlTheme {
     }
 }
 
+function Set-DialogTheme {
+    <# Dark-theme a modal dialog Form to match the main window: dark surface + light text, themed
+       inputs, and flat-styled buttons (otherwise dialogs render as light popups on the dark app).
+       Call right before ShowDialog. Native OS file dialogs (Open/Save) can't be themed -- skip those. #>
+    param([System.Windows.Forms.Form]$Form)
+    if (-not $Form) { return }
+    $t = Get-Theme
+    $Form.BackColor = $t.Surface
+    $Form.ForeColor = $t.Text
+    Set-ControlTheme -Root $Form
+    Set-DialogButtonStyle -Root $Form
+}
+
+function Set-DialogButtonStyle {
+    <# Recursively give every Button under $Root the flat secondary style (dialogs build plain default
+       buttons, which look light on the dark theme). Primary CTAs can be re-styled by the caller after. #>
+    param([System.Windows.Forms.Control]$Root)
+    foreach ($c in $Root.Controls) {
+        if ($c -is [System.Windows.Forms.Button]) { Set-SecondaryButtonStyle $c }
+        if ($c.HasChildren) { Set-DialogButtonStyle -Root $c }
+    }
+}
+
 function Set-Progress {
     param([string]$Text, [int]$Value = -1, [int]$Max = -1)
     if ($script:UI -and $script:UI.Status) {
@@ -153,10 +176,10 @@ function Set-UiBusy {
     $script:UI.Busy = $Busy
     $script:UI.Form.Cursor = if ($Busy) { [System.Windows.Forms.Cursors]::WaitCursor } else { [System.Windows.Forms.Cursors]::Default }
     # Block re-entrant input while a long Graph/AD/EXO call runs: Set-Progress pumps DoEvents(), so
-    # without this a second click would re-enter Save/Delete/Connect mid-operation. Disable only the
-    # tab area + the Connect/Switch button (both are unconditionally enabled when idle, so restoring
-    # them on completion is always correct -- unlike DisconnectBtn, whose state is connection-driven).
-    foreach ($c in @($script:UI.Tabs, $script:UI.ConnectBtn)) {
+    # without this a second click would re-enter Save/Delete/Connect mid-operation. Disable the page
+    # content + the sidebar nav + the Connect/Switch button (all unconditionally enabled when idle, so
+    # restoring them on completion is always correct -- unlike DisconnectBtn, whose state is conn-driven).
+    foreach ($c in @($script:UI.PageHost, $script:UI.NavPanel, $script:UI.ConnectBtn)) {
         if ($c) { $c.Enabled = -not $Busy }
     }
     [System.Windows.Forms.Application]::DoEvents()

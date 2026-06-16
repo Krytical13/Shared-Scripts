@@ -688,9 +688,14 @@ Assert-That 'main form builds headless' {
     $form.PerformLayout()
     $form -is [System.Windows.Forms.Form]
 }
-Assert-That 'has Users, Groups and Exchange tabs' {
-    $tabs = & $mod { $script:UI.Tabs }
-    ($tabs.TabPages.Count -eq 3) -and ($tabs.TabPages[2].Text -eq 'Exchange')
+Assert-That 'sidebar nav hosts Users, Groups and Exchange pages' {
+    & $mod {
+        # The TabControl was replaced by a left sidebar + a single page host holding three page panels.
+        ($script:UI.PageHost.Controls.Count -eq 3) -and
+        ($script:UI.NavButtons.Count -eq 3) -and
+        [bool]$script:UI.User.Page -and [bool]$script:UI.Group.Page -and [bool]$script:UI.Exchange.Page -and
+        ($script:UI.NavButtons['Exchange'].Tag -eq 'Exchange')
+    }
 }
 Assert-That 'Exchange tab starts gated (not connected, management panel hidden)' {
     # Note: Control.Visible reports EFFECTIVE visibility (false for any control on a form that was
@@ -715,11 +720,15 @@ Assert-That 'disconnected empty-state overlay covers the User form before connec
         [bool]$ov -and ($null -ne $ov.Parent) -and ($ov.Parent.Controls.GetChildIndex($ov) -eq 0)
     }
 }
-Assert-That 'Enter commits the active tab primary (AcceptButton points at that tab Save)' {
+Assert-That 'sidebar selection shows the page + points Enter at its primary (Select-NavPage)' {
     & $mod {
-        $script:UI.Tabs.SelectedIndex = 0
-        Set-FormAcceptButton
-        [object]::ReferenceEquals($script:UI.Form.AcceptButton, $script:UI.User.SaveBtn)
+        Select-NavPage -Page 'Group'
+        $grpOk = ($script:UI.CurrentPage -eq 'Group') -and ($script:UI.HeaderTitle.Text -eq 'Groups') -and
+                 [object]::ReferenceEquals($script:UI.Form.AcceptButton, $script:UI.Group.SaveBtn)
+        Select-NavPage -Page 'User'
+        $usrOk = ($script:UI.CurrentPage -eq 'User') -and ($script:UI.HeaderTitle.Text -eq 'Users') -and
+                 [object]::ReferenceEquals($script:UI.Form.AcceptButton, $script:UI.User.SaveBtn)
+        $grpOk -and $usrOk
     }
 }
 Assert-That 'Sync-ConnectionUi reflects a disconnected attempt (clears selection, label shows Not connected)' {

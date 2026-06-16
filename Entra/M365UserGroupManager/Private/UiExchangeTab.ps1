@@ -16,8 +16,9 @@
 function New-ExchangeTab {
     $t = Get-Theme
 
-    $page = New-Object System.Windows.Forms.TabPage
-    $page.Text = 'Exchange'; $page.UseVisualStyleBackColor = $true; $page.Padding = New-Object System.Windows.Forms.Padding(8)
+    # Content page hosted in the main form's page area (was a TabPage; now a Dock=Fill Panel).
+    $page = New-Object System.Windows.Forms.Panel
+    $page.Dock = 'Fill'; $page.BackColor = $t.Surface; $page.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 8)
 
     # --- Activation (empty state) panel ----------------------------------------------------
     $act = New-Object System.Windows.Forms.TableLayoutPanel

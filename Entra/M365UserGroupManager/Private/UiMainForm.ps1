@@ -30,72 +30,119 @@ function New-MainForm {
     $errorProvider = New-Object System.Windows.Forms.ErrorProvider
     $errorProvider.BlinkStyle = 'NeverBlink'
 
+    $form.Size = New-Object System.Drawing.Size(1000, 800)
+    $form.MinimumSize = New-Object System.Drawing.Size(880, 640)
+
+    # ===== Root: [ left sidebar | content ] =================================================
     $root = New-Object System.Windows.Forms.TableLayoutPanel
-    $root.Dock = 'Fill'; $root.ColumnCount = 1; $root.RowCount = 3
+    $root.Dock = 'Fill'; $root.ColumnCount = 2; $root.RowCount = 1
+    [void]$root.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, $t.NavW)))
     [void]$root.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 54)))
     [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 62)))
     $form.Controls.Add($root)
 
-    # --- Top: connect + tenant bar (tinted band with a brand accent line) ------------------
-    $top = New-Object System.Windows.Forms.Panel; $top.Dock = 'Fill'; $top.BackColor = $t.SurfaceAlt
-    $topAccent = New-Object System.Windows.Forms.Panel; $topAccent.Height = 3; $topAccent.Dock = 'Bottom'; $topAccent.BackColor = $t.Brand
-    $top.Controls.Add($topAccent)
-    $connectBtn = New-Object System.Windows.Forms.Button
-    $connectBtn.Text = '&Connect'; $connectBtn.Location = New-Object System.Drawing.Point(10, 12); $connectBtn.Size = New-Object System.Drawing.Size(140, 30)
-    $disconnectBtn = New-Object System.Windows.Forms.Button
-    $disconnectBtn.Text = 'Dis&connect'; $disconnectBtn.Location = New-Object System.Drawing.Point(156, 12); $disconnectBtn.Size = New-Object System.Drawing.Size(96, 30); $disconnectBtn.Enabled = $false
+    # ----- Left sidebar: brand / nav / connection ------------------------------------------
+    $nav = New-Object System.Windows.Forms.TableLayoutPanel
+    $nav.Dock = 'Fill'; $nav.BackColor = $t.NavBg; $nav.ColumnCount = 1; $nav.RowCount = 7
+    $nav.Margin = New-Object System.Windows.Forms.Padding(0)
+    [void]$nav.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    foreach ($h in 66, 24, 44, 44, 44) { [void]$nav.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, $h))) }
+    [void]$nav.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))   # spacer
+    [void]$nav.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))       # connection
 
+    $brand = New-Object System.Windows.Forms.Label
+    $brand.Text = 'M365 Manager'; $brand.Dock = 'Fill'; $brand.TextAlign = 'MiddleLeft'; $brand.ForeColor = $t.Brand
+    $brand.Font = New-Object System.Drawing.Font('Segoe UI Semibold', 14); $brand.Padding = New-Object System.Windows.Forms.Padding(16, 0, 8, 0)
+    $cap = New-Object System.Windows.Forms.Label
+    $cap.Text = 'MAIN'; $cap.Dock = 'Fill'; $cap.TextAlign = 'BottomLeft'; $cap.ForeColor = $t.Muted; $cap.Font = $t.FontNavHdr
+    $cap.Padding = New-Object System.Windows.Forms.Padding(18, 0, 8, 4)
+
+    $navUser  = New-NavItem -Key 'User'     -Text 'Users'
+    $navGroup = New-NavItem -Key 'Group'    -Text 'Groups'
+    $navExch  = New-NavItem -Key 'Exchange' -Text 'Exchange'
+
+    # Connection block, pinned to the sidebar bottom.
+    $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
+    $connPanel.Dock = 'Fill'; $connPanel.AutoSize = $true; $connPanel.AutoSizeMode = 'GrowAndShrink'
+    $connPanel.ColumnCount = 1; $connPanel.RowCount = 3; $connPanel.BackColor = $t.NavBg
+    $connPanel.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 14)
+    [void]$connPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $connLabel = New-Object System.Windows.Forms.Label
-    $connLabel.AutoSize = $true; $connLabel.Location = New-Object System.Drawing.Point(264, 13); $connLabel.Text = "$([char]0x25CB) Not connected"
-    $connLabel.Font = $t.FontMedium; $connLabel.ForeColor = $t.ErrText; $connLabel.BackColor = $t.ErrBack
-    $connLabel.Padding = New-Object System.Windows.Forms.Padding(9, 5, 9, 5); $connLabel.TextAlign = 'MiddleLeft'
-    $top.Controls.AddRange(@($connectBtn, $disconnectBtn, $connLabel))
-    $root.Controls.Add($top, 0, 0)
+    $connLabel.Text = "$([char]0x25CB) Not connected"; $connLabel.AutoSize = $true; $connLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 28), 0)
+    $connLabel.Font = $t.FontBase; $connLabel.ForeColor = $t.ErrText; $connLabel.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 8)
+    $connectBtn = New-Object System.Windows.Forms.Button
+    $connectBtn.Text = '&Connect'; $connectBtn.Dock = 'Fill'; $connectBtn.Height = $t.BtnHPrimary; $connectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 2, 3, 6)
+    $disconnectBtn = New-Object System.Windows.Forms.Button
+    $disconnectBtn.Text = 'Dis&connect'; $disconnectBtn.Dock = 'Fill'; $disconnectBtn.Height = $t.BtnH; $disconnectBtn.Enabled = $false; $disconnectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 0)
+    $connPanel.Controls.Add($connLabel, 0, 0); $connPanel.Controls.Add($connectBtn, 0, 1); $connPanel.Controls.Add($disconnectBtn, 0, 2)
 
-    # --- Middle: Users / Groups tabs -------------------------------------------------------
-    $tabs = New-Object System.Windows.Forms.TabControl
-    $tabs.Dock = 'Fill'; $tabs.Padding = New-Object System.Drawing.Point(14, 6)
-    $root.Controls.Add($tabs, 0, 1)
+    $nav.Controls.Add($brand, 0, 0); $nav.Controls.Add($cap, 0, 1)
+    $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4)
+    $nav.Controls.Add($connPanel, 0, 6)
+    $root.Controls.Add($nav, 0, 0)
 
-    # --- Bottom: status + progress ---------------------------------------------------------
+    # ----- Content: header / page host / status bar ----------------------------------------
+    $content = New-Object System.Windows.Forms.TableLayoutPanel
+    $content.Dock = 'Fill'; $content.BackColor = $t.AppBg; $content.ColumnCount = 1; $content.RowCount = 3
+    [void]$content.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$content.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 58)))
+    [void]$content.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$content.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 56)))
+
+    $header = New-Object System.Windows.Forms.Panel; $header.Dock = 'Fill'; $header.BackColor = $t.Surface
+    $hdrAccent = New-Object System.Windows.Forms.Panel; $hdrAccent.Dock = 'Bottom'; $hdrAccent.Height = 2; $hdrAccent.BackColor = $t.Brand
+    $hdrTitle = New-Object System.Windows.Forms.Label
+    $hdrTitle.Text = 'Users'; $hdrTitle.Dock = 'Fill'; $hdrTitle.TextAlign = 'MiddleLeft'; $hdrTitle.Font = $t.FontTitle; $hdrTitle.ForeColor = $t.Text
+    $hdrTitle.Padding = New-Object System.Windows.Forms.Padding(20, 0, 12, 0)
+    $header.Controls.Add($hdrTitle); $header.Controls.Add($hdrAccent)
+    $content.Controls.Add($header, 0, 0)
+
+    $pageHost = New-Object System.Windows.Forms.Panel; $pageHost.Dock = 'Fill'; $pageHost.BackColor = $t.AppBg
+    $content.Controls.Add($pageHost, 0, 1)
+
     $bottom = New-Object System.Windows.Forms.TableLayoutPanel
     $bottom.Dock = 'Fill'; $bottom.ColumnCount = 1; $bottom.RowCount = 2; $bottom.BackColor = $t.SurfaceAlt
-    [void]$bottom.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 22)))
+    [void]$bottom.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$bottom.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 20)))
     [void]$bottom.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $progress = New-Object System.Windows.Forms.ProgressBar
-    $progress.Dock = 'Fill'; $progress.Style = 'Continuous'; $progress.Margin = New-Object System.Windows.Forms.Padding(12, 6, 12, 4); $progress.BackColor = $t.ProgBack
+    $progress.Dock = 'Fill'; $progress.Style = 'Continuous'; $progress.Margin = New-Object System.Windows.Forms.Padding(14, 5, 14, 3); $progress.BackColor = $t.ProgBack
     $status = New-Object System.Windows.Forms.Label
     $status.Dock = 'Fill'; $status.Text = 'Ready. Connect to Microsoft 365 to begin.'; $status.AutoEllipsis = $true
-    $status.TextAlign = 'MiddleLeft'; $status.Margin = New-Object System.Windows.Forms.Padding(12, 0, 12, 4); $status.ForeColor = $t.Muted
+    $status.TextAlign = 'MiddleLeft'; $status.Margin = New-Object System.Windows.Forms.Padding(14, 0, 14, 3); $status.ForeColor = $t.Muted
     $bottom.Controls.Add($progress, 0, 0); $bottom.Controls.Add($status, 0, 1)
-    $root.Controls.Add($bottom, 0, 2)
+    $content.Controls.Add($bottom, 0, 2)
+    $root.Controls.Add($content, 1, 0)
 
-    # --- Stash core handles, then build the two tabs ---------------------------------------
+    # --- Stash core handles, then build the pages ------------------------------------------
     $script:UI = @{
-        Form = $form; Tabs = $tabs; Tooltip = $tooltip; ErrorProvider = $errorProvider
+        Form = $form; Tooltip = $tooltip; ErrorProvider = $errorProvider
         ConnectBtn = $connectBtn; DisconnectBtn = $disconnectBtn
         ConnLabel = $connLabel; Status = $status; Progress = $progress
+        NavPanel = $nav; PageHost = $pageHost; HeaderTitle = $hdrTitle; CurrentPage = 'User'
+        NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button }
+        NavStrips  = @{ User = $navUser.Strip;  Group = $navGroup.Strip;  Exchange = $navExch.Strip }
         User = $null; Group = $null; Exchange = $null
     }
 
-    [void]$tabs.TabPages.Add((New-EntityTab -Tab 'User' -Title 'Users'))
-    [void]$tabs.TabPages.Add((New-EntityTab -Tab 'Group' -Title 'Groups'))
-    [void]$tabs.TabPages.Add((New-ExchangeTab))
+    # Build the three pages (Panels now, not TabPages) and stack them in the content host; one shows
+    # at a time (Select-NavPage toggles visibility -- only the visible Dock=Fill page claims the space).
+    foreach ($p in @((New-EntityTab -Tab 'User' -Title 'Users'), (New-EntityTab -Tab 'Group' -Title 'Groups'), (New-ExchangeTab))) {
+        $p.Dock = 'Fill'; $p.Visible = $false
+        $pageHost.Controls.Add($p)
+    }
     Update-ExchangeActivation   # show the gated empty-state until Exchange is activated
 
-    # Enter commits the active tab's primary action (re-pointed when the tab changes).
-    $tabs.Add_SelectedIndexChanged({ Set-FormAcceptButton })
-    Set-FormAcceptButton
-
-    foreach ($b in @($connectBtn, $disconnectBtn)) { Set-SecondaryButtonStyle $b }
-
-    # --- Wire connection events ------------------------------------------------------------
-    # One button drives the whole account flow: connect, switch between saved accounts, or add a
-    # new one. Its label flips to "Switch account" once connected (see Update-ConnectionLabel).
+    # --- Wire nav + connection events ------------------------------------------------------
+    foreach ($item in @($navUser, $navGroup, $navExch)) {
+        $item.Button.Add_Click({ param($s, $e) Select-NavPage -Page $s.Tag })
+    }
+    Set-PrimaryButtonStyle $connectBtn        # the main call-to-action in the sidebar
+    Set-SecondaryButtonStyle $disconnectBtn
     $connectBtn.Add_Click({ Invoke-Account })
     $disconnectBtn.Add_Click({ Invoke-Disconnect })
+
+    Select-NavPage -Page 'User'   # show first page, select its nav item, set header + AcceptButton
 
     # On open, let the user choose which saved account to connect to (when more than one) instead of
     # silently adopting the last/persisted session. Plain scriptblock keeps module affinity.
@@ -105,13 +152,63 @@ function New-MainForm {
     return $form
 }
 
+function New-NavItem {
+    <# A left-sidebar nav row: a 3px accent strip + a full-width flat button. Returns @{ Row; Button;
+       Strip } so Select-NavPage can toggle the selected look. The button's Tag is the page key. #>
+    param([string]$Key, [string]$Text)
+    $t = Get-Theme
+    $row = New-Object System.Windows.Forms.Panel; $row.Dock = 'Fill'; $row.BackColor = $t.NavBg; $row.Margin = New-Object System.Windows.Forms.Padding(0)
+    $strip = New-Object System.Windows.Forms.Panel; $strip.Dock = 'Left'; $strip.Width = 3; $strip.BackColor = $t.NavBg
+    $btn = New-Object System.Windows.Forms.Button
+    $btn.Dock = 'Fill'; $btn.Text = $Text; $btn.Tag = $Key; $btn.FlatStyle = 'Flat'; $btn.TextAlign = 'MiddleLeft'
+    $btn.Font = $t.FontNav; $btn.ForeColor = $t.Muted; $btn.BackColor = $t.NavBg
+    $btn.FlatAppearance.BorderSize = 0; $btn.FlatAppearance.MouseOverBackColor = $t.NavSelBg
+    $btn.Padding = New-Object System.Windows.Forms.Padding(16, 0, 0, 0); $btn.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $row.Controls.Add($btn); $row.Controls.Add($strip)
+    return @{ Row = $row; Button = $btn; Strip = $strip }
+}
+
+function Set-NavItemSelected {
+    <# Apply the selected / unselected look to a sidebar nav row (fill + accent strip + text weight). #>
+    param([string]$Key, [bool]$Selected)
+    $t = Get-Theme
+    $btn = $script:UI.NavButtons[$Key]; $strip = $script:UI.NavStrips[$Key]
+    if (-not $btn) { return }
+    if ($Selected) {
+        $btn.BackColor = $t.NavSelBg; $btn.ForeColor = $t.Text; $btn.Font = $t.FontMedium
+        $strip.BackColor = $t.Brand
+    } else {
+        $btn.BackColor = $t.NavBg; $btn.ForeColor = $t.Muted; $btn.Font = $t.FontNav
+        $strip.BackColor = $t.NavBg
+    }
+}
+
+function Select-NavPage {
+    <# Show one content page (User / Group / Exchange), select its nav item, set the header title, and
+       re-point the Enter/AcceptButton. Replaces the old TabControl selection. #>
+    param([ValidateSet('User', 'Group', 'Exchange')][string]$Page)
+    if (-not $script:UI) { return }
+    $script:UI.CurrentPage = $Page
+    foreach ($k in 'User', 'Group', 'Exchange') {
+        $ctx = $script:UI[$k]
+        $pg = if ($ctx) { $ctx.Page } else { $null }
+        $sel = ($k -eq $Page)
+        if ($pg) { $pg.Visible = $sel; if ($sel) { $pg.BringToFront() } }
+        Set-NavItemSelected -Key $k -Selected $sel
+    }
+    $script:UI.HeaderTitle.Text = switch ($Page) { 'User' { 'Users' } 'Group' { 'Groups' } 'Exchange' { 'Exchange' } }
+    Set-FormAcceptButton
+}
+
 function New-EntityTab {
     param([ValidateSet('User', 'Group')][string]$Tab, [string]$Title)
     $t = Get-Theme
     $entityWord = if ($Tab -eq 'User') { 'user' } else { 'group' }
 
-    $page = New-Object System.Windows.Forms.TabPage
-    $page.Text = $Title; $page.BackColor = $t.Surface; $page.UseVisualStyleBackColor = $false; $page.Padding = New-Object System.Windows.Forms.Padding(8)
+    # A content page hosted in the main form's page area (was a TabPage; now a Dock=Fill Panel that the
+    # sidebar shows/hides). $Title drives the header text via Select-NavPage, not a tab caption.
+    $page = New-Object System.Windows.Forms.Panel
+    $page.Dock = 'Fill'; $page.BackColor = $t.Surface; $page.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 8)
 
     $layout = New-Object System.Windows.Forms.TableLayoutPanel
     $layout.Dock = 'Fill'; $layout.ColumnCount = 1; $layout.RowCount = 3
@@ -594,15 +691,15 @@ function Set-TabActionState {
 }
 
 function Set-FormAcceptButton {
-    <# Make Enter commit the active tab's primary action -- matching every dialog in the app (Nielsen #4
+    <# Make Enter commit the active page's primary action -- matching every dialog in the app (Nielsen #4
        Consistency + the Windows convention). A disabled primary (e.g. before connect) does nothing on
        Enter; multiline fields keep Enter (AcceptsReturn = true) so they aren't hijacked. #>
-    if (-not $script:UI -or -not $script:UI.Form -or -not $script:UI.Tabs) { return }
-    $btn = switch ($script:UI.Tabs.SelectedIndex) {
-        0 { $script:UI.User.SaveBtn }
-        1 { $script:UI.Group.SaveBtn }
-        2 { if ($script:UI.Exchange) { $script:UI.Exchange.SaveBtn } else { $null } }
-        default { $null }
+    if (-not $script:UI -or -not $script:UI.Form) { return }
+    $btn = switch ($script:UI.CurrentPage) {
+        'User'     { $script:UI.User.SaveBtn }
+        'Group'    { $script:UI.Group.SaveBtn }
+        'Exchange' { if ($script:UI.Exchange) { $script:UI.Exchange.SaveBtn } else { $null } }
+        default    { $null }
     }
     $script:UI.Form.AcceptButton = $btn
 }
@@ -819,6 +916,7 @@ function Show-AccountDialog {
 
     $dlg.Controls.AddRange(@($lbl, $list, $connectBtn, $newBtn, $removeBtn, $cancelBtn))
     $dlg.CancelButton = $cancelBtn
+    Set-DialogTheme -Form $dlg; Set-PrimaryButtonStyle $connectBtn   # dark theme + primary CTA
     [void]$dlg.ShowDialog()
     $dlg.Dispose()
     return $script:AccountDialogResult
@@ -1511,6 +1609,7 @@ function Show-PasswordResetDialog {
     $dlg.Controls.AddRange(@($info, $pwd, $gen, $force, $ok, $cancel))
     $dlg.AcceptButton = $ok; $dlg.CancelButton = $cancel
 
+    Set-DialogTheme -Form $dlg; Set-PrimaryButtonStyle $ok   # dark theme + keep Reset as the primary
     if ($dlg.ShowDialog() -ne 'OK') { $dlg.Dispose(); return $null }
     $p = $pwd.Text; $f = [bool]$force.Checked
     $dlg.Dispose()
@@ -1538,6 +1637,7 @@ function Show-TypedConfirm {
     # button, which only enables after the exact name is typed. Enter must never trigger a delete.
     $dlg.AcceptButton = $cancel; $dlg.CancelButton = $cancel
 
+    Set-DialogTheme -Form $dlg; Set-DangerButtonStyle $ok   # dark theme + red danger Delete button
     $result = $dlg.ShowDialog()
     $dlg.Dispose()
     return ($result -eq 'OK')

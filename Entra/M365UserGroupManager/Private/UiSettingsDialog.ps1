@@ -100,6 +100,7 @@ function Show-SettingsDialog {
     $root.Controls.Add($btnBar, 0, 2)
     $dlg.AcceptButton = $okBtn; $dlg.CancelButton = $cancelBtn
 
+    Set-DialogTheme -Form $dlg; Set-PrimaryButtonStyle $okBtn   # dark theme + primary CTA
     $result = $dlg.ShowDialog()
     if ($result -ne 'OK') { $dlg.Dispose(); return $false }
 

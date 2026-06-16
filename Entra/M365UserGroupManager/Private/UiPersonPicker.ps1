@@ -146,6 +146,7 @@ function Show-PersonPicker {
     # Auto-list the first 100 on open so the dialog is a browser, not just a search box.
     $dlg.Add_Shown({ & $doSearch }.GetNewClosure())
 
+    Set-DialogTheme -Form $dlg   # match the dark main window
     if ($dlg.ShowDialog() -ne 'OK') { $dlg.Dispose(); return $null }
 
     $chosen = New-Object System.Collections.Generic.List[object]

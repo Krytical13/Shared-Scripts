@@ -234,9 +234,9 @@ function Restore-ExchangeSnapshot {
 function Import-SnapshotIntoForm {
     param($Snapshot)
     switch ($Snapshot.Tab) {
-        'User'     { $script:UI.Tabs.SelectedTab = $script:UI.User.Page;  Restore-UserSnapshot $Snapshot }
-        'Group'    { $script:UI.Tabs.SelectedTab = $script:UI.Group.Page; Restore-GroupSnapshot $Snapshot }
-        'Exchange' { $script:UI.Tabs.SelectedTab = $script:UI.Exchange.Page; Restore-ExchangeSnapshot $Snapshot }
+        'User'     { Select-NavPage -Page 'User';  Restore-UserSnapshot $Snapshot }
+        'Group'    { Select-NavPage -Page 'Group'; Restore-GroupSnapshot $Snapshot }
+        'Exchange' { Select-NavPage -Page 'Exchange'; Restore-ExchangeSnapshot $Snapshot }
         default    { [System.Windows.Forms.MessageBox]::Show("Unknown backup tab: $($Snapshot.Tab)", 'Restore error', 'OK', 'Warning') | Out-Null }
     }
 }
