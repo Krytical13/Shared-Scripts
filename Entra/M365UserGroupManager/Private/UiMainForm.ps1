@@ -47,7 +47,7 @@ function New-MainForm {
     $disconnectBtn.Text = 'Dis&connect'; $disconnectBtn.Location = New-Object System.Drawing.Point(156, 12); $disconnectBtn.Size = New-Object System.Drawing.Size(96, 30); $disconnectBtn.Enabled = $false
 
     $connLabel = New-Object System.Windows.Forms.Label
-    $connLabel.AutoSize = $true; $connLabel.Location = New-Object System.Drawing.Point(264, 13); $connLabel.Text = 'Not connected'
+    $connLabel.AutoSize = $true; $connLabel.Location = New-Object System.Drawing.Point(264, 13); $connLabel.Text = "$([char]0x25CB) Not connected"
     $connLabel.Font = $t.FontMedium; $connLabel.ForeColor = $t.ErrText; $connLabel.BackColor = $t.ErrBack
     $connLabel.Padding = New-Object System.Windows.Forms.Padding(9, 5, 9, 5); $connLabel.TextAlign = 'MiddleLeft'
     $top.Controls.AddRange(@($connectBtn, $disconnectBtn, $connLabel))
@@ -83,6 +83,10 @@ function New-MainForm {
     [void]$tabs.TabPages.Add((New-EntityTab -Tab 'Group' -Title 'Groups'))
     [void]$tabs.TabPages.Add((New-ExchangeTab))
     Update-ExchangeActivation   # show the gated empty-state until Exchange is activated
+
+    # Enter commits the active tab's primary action (re-pointed when the tab changes).
+    $tabs.Add_SelectedIndexChanged({ Set-FormAcceptButton })
+    Set-FormAcceptButton
 
     foreach ($b in @($connectBtn, $disconnectBtn)) { Set-SecondaryButtonStyle $b }
 
@@ -131,22 +135,26 @@ function New-EntityTab {
     if ($Tab -eq 'User') {
         $typePanel = New-Object System.Windows.Forms.FlowLayoutPanel
         $typePanel.AutoSize = $true; $typePanel.AutoSizeMode = 'GrowAndShrink'; $typePanel.FlowDirection = 'LeftToRight'; $typePanel.WrapContents = $false; $typePanel.Margin = New-Object System.Windows.Forms.Padding(0)
-        $typeSep = New-Object System.Windows.Forms.Label; $typeSep.Text = '|'; $typeSep.AutoSize = $true; $typeSep.ForeColor = $t.Border; $typeSep.Margin = New-Object System.Windows.Forms.Padding(2, 11, 6, 3)
+        # Visible divider (Muted = 5.4:1, not the near-invisible Border at 1.35:1) so the account-type
+        # radios read as a separate group from New/Edit -- a perceivable Gestalt boundary (SC 1.4.11).
+        $typeSep = New-Object System.Windows.Forms.Label; $typeSep.Text = '|'; $typeSep.AutoSize = $true; $typeSep.ForeColor = $t.Muted; $typeSep.Margin = New-Object System.Windows.Forms.Padding(2, 10, 6, 3)
         $typeMember = New-Object System.Windows.Forms.RadioButton; $typeMember.Text = '&Member'; $typeMember.AutoSize = $true; $typeMember.Checked = $true; $typeMember.Margin = New-Object System.Windows.Forms.Padding(3, 10, 6, 3)
         $typeGuest = New-Object System.Windows.Forms.RadioButton; $typeGuest.Text = '&Guest (invite)'; $typeGuest.AutoSize = $true; $typeGuest.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
         $typePanel.Controls.AddRange(@($typeSep, $typeMember, $typeGuest))
     }
-    $selectBtn = New-Object System.Windows.Forms.Button; $selectBtn.Text = "&Select $entityWord..."; $selectBtn.Width = 130; $selectBtn.Height = 26; $selectBtn.Visible = $false; $selectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 3)
+    $selectBtn = New-Object System.Windows.Forms.Button; $selectBtn.Text = "&Select $entityWord..."; $selectBtn.Width = 130; $selectBtn.Height = $t.BtnH; $selectBtn.Visible = $false; $selectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 7, 8, 3)
     Set-SecondaryButtonStyle $selectBtn
-    $targetLabel = New-Object System.Windows.Forms.Label; $targetLabel.AutoSize = $true; $targetLabel.Margin = New-Object System.Windows.Forms.Padding(3, 11, 3, 3); $targetLabel.ForeColor = $t.Muted; $targetLabel.Visible = $false
+    $targetLabel = New-Object System.Windows.Forms.Label; $targetLabel.AutoSize = $true; $targetLabel.Margin = New-Object System.Windows.Forms.Padding(3, 10, 3, 3); $targetLabel.ForeColor = $t.Muted; $targetLabel.Visible = $false
     if ($Tab -eq 'User') {
         $left.Controls.AddRange(@($modeNew, $modeEdit, $typePanel, $selectBtn, $targetLabel))
     } else {
         $left.Controls.AddRange(@($modeNew, $modeEdit, $selectBtn, $targetLabel))
     }
 
-    $settingsBtn = New-Object System.Windows.Forms.Button; $settingsBtn.Text = '&Fields...'; $settingsBtn.Width = 96; $settingsBtn.Height = 28; $settingsBtn.Margin = New-Object System.Windows.Forms.Padding(3, 7, 3, 3)
+    # Verb-led, outcome-describing label (not the opaque "Fields...") + a tooltip spelling out what it does.
+    $settingsBtn = New-Object System.Windows.Forms.Button; $settingsBtn.Text = 'Choose &fields...'; $settingsBtn.Width = 120; $settingsBtn.Height = $t.BtnH; $settingsBtn.Margin = New-Object System.Windows.Forms.Padding(3, 7, 3, 3)
     Set-SecondaryButtonStyle $settingsBtn
+    $script:UI.Tooltip.SetToolTip($settingsBtn, 'Choose which attributes appear on the Edit form')
     $header.Controls.Add($left, 0, 0); $header.Controls.Add($settingsBtn, 1, 0)
     $layout.Controls.Add($header, 0, 0)
 
@@ -196,25 +204,55 @@ function New-EntityTab {
     [void]$actions.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     [void]$actions.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
     $leftActions = New-Object System.Windows.Forms.FlowLayoutPanel; $leftActions.Dock = 'Fill'; $leftActions.FlowDirection = 'LeftToRight'; $leftActions.WrapContents = $false
-    $saveBtn = New-Object System.Windows.Forms.Button; $saveBtn.Text = "&Create $entityWord"; $saveBtn.Width = 150; $saveBtn.Height = 34; $saveBtn.Font = $t.FontMedium; $saveBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 6)
+    # The single primary action is the dominant control: accent fill + widest + a heavier font (so its
+    # prominence survives grayscale / colour-blindness, not fill-colour alone). Secondaries share the
+    # row height token; the primary stands out on the other three channels.
+    $saveBtn = New-Object System.Windows.Forms.Button; $saveBtn.Text = "&Create $entityWord"; $saveBtn.Width = 150; $saveBtn.Height = $t.BtnHPrimary; $saveBtn.Font = $t.FontLarge; $saveBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 6)
     Set-PrimaryButtonStyle $saveBtn
-    $resetBtn = New-Object System.Windows.Forms.Button; $resetBtn.Text = '&Reset'; $resetBtn.Width = 84; $resetBtn.Height = 34; $resetBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
+    $resetBtn = New-Object System.Windows.Forms.Button; $resetBtn.Text = '&Reset'; $resetBtn.Width = 84; $resetBtn.Height = $t.BtnHPrimary; $resetBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
     Set-SecondaryButtonStyle $resetBtn
-    $backupBtn = New-Object System.Windows.Forms.Button; $backupBtn.Text = '&Backup...'; $backupBtn.Width = 90; $backupBtn.Height = 34; $backupBtn.Margin = New-Object System.Windows.Forms.Padding(16, 6, 3, 6); $backupBtn.Enabled = $false
-    $restoreBtn = New-Object System.Windows.Forms.Button; $restoreBtn.Text = 'Res&tore...'; $restoreBtn.Width = 90; $restoreBtn.Height = 34; $restoreBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
+    $backupBtn = New-Object System.Windows.Forms.Button; $backupBtn.Text = '&Backup...'; $backupBtn.Width = 90; $backupBtn.Height = $t.BtnHPrimary; $backupBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 6, 3, 6); $backupBtn.Enabled = $false
+    $restoreBtn = New-Object System.Windows.Forms.Button; $restoreBtn.Text = 'Res&tore...'; $restoreBtn.Width = 90; $restoreBtn.Height = $t.BtnHPrimary; $restoreBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
     Set-SecondaryButtonStyle $backupBtn; Set-SecondaryButtonStyle $restoreBtn
     $leftActions.Controls.AddRange(@($saveBtn, $resetBtn, $backupBtn, $restoreBtn))
     $rightActions = New-Object System.Windows.Forms.FlowLayoutPanel; $rightActions.Dock = 'Fill'; $rightActions.FlowDirection = 'RightToLeft'; $rightActions.WrapContents = $false
-    $deleteBtn = New-Object System.Windows.Forms.Button; $deleteBtn.Text = "&Delete $entityWord"; $deleteBtn.Width = 130; $deleteBtn.Height = 34; $deleteBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6); $deleteBtn.Visible = $false
-    Set-SecondaryButtonStyle $deleteBtn
-    $deleteBtn.ForeColor = $t.ErrText
+    $deleteBtn = New-Object System.Windows.Forms.Button; $deleteBtn.Text = "&Delete $entityWord"; $deleteBtn.Width = 130; $deleteBtn.Height = $t.BtnHPrimary; $deleteBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6); $deleteBtn.Visible = $false
+    Set-DangerButtonStyle $deleteBtn   # red border (affordance survives grayscale), not red text alone
     $rightActions.Controls.Add($deleteBtn)
     $actions.Controls.Add($leftActions, 0, 0); $actions.Controls.Add($rightActions, 1, 0)
     $layout.Controls.Add($actions, 0, 2)
 
+    # --- Disconnected empty-state -----------------------------------------------------------
+    # Until connected, cover the form with a centered call-to-action (mirroring the Exchange tab) so
+    # the user isn't presented with an editable-but-dead form and a greyed-out Create button with no
+    # in-context reason. This panel is also the tab's on-canvas H1 (the top tier of the type scale).
+    $overlay = New-Object System.Windows.Forms.TableLayoutPanel
+    $overlay.Dock = 'Fill'; $overlay.BackColor = $t.Surface; $overlay.ColumnCount = 1; $overlay.RowCount = 3
+    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 38)))
+    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 62)))
+    $ovContent = New-Object System.Windows.Forms.FlowLayoutPanel
+    $ovContent.FlowDirection = 'TopDown'; $ovContent.WrapContents = $false; $ovContent.AutoSize = $true
+    $ovContent.AutoSizeMode = 'GrowAndShrink'; $ovContent.Anchor = 'None'
+    $ovTitle = New-Object System.Windows.Forms.Label
+    $ovTitle.Text = "Manage $($Title.ToLower())"; $ovTitle.Font = $t.FontLarge; $ovTitle.ForeColor = $t.Accent; $ovTitle.AutoSize = $true
+    $ovTitle.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 6)
+    $ovExplain = New-Object System.Windows.Forms.Label
+    $ovExplain.Text = "Create a new $entityWord or edit an existing one. Connect to Microsoft 365 to begin."
+    $ovExplain.AutoSize = $true; $ovExplain.MaximumSize = New-Object System.Drawing.Size(440, 0); $ovExplain.ForeColor = $t.Muted
+    $ovExplain.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 14)
+    $ovBtn = New-Object System.Windows.Forms.Button
+    $ovBtn.Text = 'Connect to Microsoft 365'; $ovBtn.Width = 240; $ovBtn.Height = 38; $ovBtn.Font = $t.FontMedium
+    Set-PrimaryButtonStyle $ovBtn
+    $ovBtn.Add_Click({ Invoke-Account })
+    $ovContent.Controls.AddRange(@($ovTitle, $ovExplain, $ovBtn))
+    $overlay.Controls.Add($ovContent, 0, 1)
+    $page.Controls.Add($overlay)
+    $overlay.BringToFront()
+
     # --- Stash tab state -------------------------------------------------------------------
     $script:UI[$Tab] = @{
-        Page = $page; Mode = 'New'
+        Page = $page; Mode = 'New'; Overlay = $overlay; ContentLayout = $layout
         ModeNew = $modeNew; ModeEdit = $modeEdit; SelectBtn = $selectBtn; TargetLabel = $targetLabel
         ScrollHost = $scroll; FormTlp = $formTlp
         Fields = @{}; Order = (New-Object System.Collections.Generic.List[object])
@@ -308,7 +346,7 @@ function Build-TabForm {
             $hdr.Text = $item.Header
             $hdr.UseMnemonic = $false   # render literal '&' in names like "Identity & Sign-in"
             $hdr.AutoSize = $true
-            $hdr.Font = $t.FontMedium
+            $hdr.Font = $t.FontSection   # a clear step above the 9pt field labels (was 9.5, nearly identical)
             $hdr.ForeColor = $t.Accent
             $hdr.Margin = New-Object System.Windows.Forms.Padding(3, $(if ($firstHeader) { 2 } else { 16 }), 3, 4)
             $tlp.Controls.Add($hdr, 0, $row)
@@ -431,6 +469,28 @@ function Set-TabActionState {
     $ctx.DeleteBtn.Enabled = $connected -and $loaded
     $ctx.SelectBtn.Enabled = $connected
     if ($ctx.BackupBtn) { $ctx.BackupBtn.Enabled = $loaded }   # backup needs a loaded object
+    # Show the connect call-to-action until connected; reveal the form once connected. Toggle BOTH
+    # (not just the overlay): two simultaneously-visible Dock=Fill siblings starve each other for
+    # space, so exactly one is shown at a time -- the same pattern the Exchange tab uses.
+    if ($ctx.Overlay -and $ctx.ContentLayout) {
+        $ctx.Overlay.Visible = -not $connected
+        $ctx.ContentLayout.Visible = $connected
+        if (-not $connected) { $ctx.Overlay.BringToFront() }
+    }
+}
+
+function Set-FormAcceptButton {
+    <# Make Enter commit the active tab's primary action -- matching every dialog in the app (Nielsen #4
+       Consistency + the Windows convention). A disabled primary (e.g. before connect) does nothing on
+       Enter; multiline fields keep Enter (AcceptsReturn = true) so they aren't hijacked. #>
+    if (-not $script:UI -or -not $script:UI.Form -or -not $script:UI.Tabs) { return }
+    $btn = switch ($script:UI.Tabs.SelectedIndex) {
+        0 { $script:UI.User.SaveBtn }
+        1 { $script:UI.Group.SaveBtn }
+        2 { if ($script:UI.Exchange) { $script:UI.Exchange.SaveBtn } else { $null } }
+        default { $null }
+    }
+    $script:UI.Form.AcceptButton = $btn
 }
 
 #endregion
@@ -442,13 +502,14 @@ function Update-ConnectionLabel {
     $t = Get-Theme
     if ($ctx) {
         $domain = Get-TenantDomainHint -Context $ctx
-        $script:UI.ConnLabel.Text = "Connected: $($ctx.Account)  [$domain]"
+        # Glyph (filled vs hollow) carries the state in a non-colour channel (SC 1.4.1 Use of Colour).
+        $script:UI.ConnLabel.Text = "$([char]0x25CF) Connected: $($ctx.Account)  [$domain]"
         $script:UI.ConnLabel.ForeColor = $t.OkText
         $script:UI.ConnLabel.BackColor = $t.OkBack
         $script:UI.ConnectBtn.Text = '&Switch account...'
         $script:UI.DisconnectBtn.Enabled = $true
     } else {
-        $script:UI.ConnLabel.Text = 'Not connected'
+        $script:UI.ConnLabel.Text = "$([char]0x25CB) Not connected"
         $script:UI.ConnLabel.ForeColor = $t.ErrText
         $script:UI.ConnLabel.BackColor = $t.ErrBack
         $script:UI.ConnectBtn.Text = '&Connect'
@@ -1036,12 +1097,16 @@ function Invoke-SaveUser {
             $add = @(Read-FieldValue $licField)
             if ($add.Count -gt 0) { Set-Progress 'Assigning licenses...'; Set-UserLicenseAssignment -Id $newId -AddSkuIds $add }
         }
-        Set-Progress "Created user $(Get-GraphVal $created 'userPrincipalName')."
-        [System.Windows.Forms.MessageBox]::Show("User created:`n$(Get-GraphVal $created 'userPrincipalName')", 'User created', 'OK', 'Information') | Out-Null
+        $newUpn = Get-GraphVal $created 'userPrincipalName'
+        # Explain the handoff: the view is about to switch from New to Edit underneath the user.
+        [System.Windows.Forms.MessageBox]::Show(
+            "User created:`n$newUpn`n`nNow switching to Edit mode so you can complete the remaining details (job, department, manager, licenses) or pick another user.",
+            'User created', 'OK', 'Information') | Out-Null
 
         # Switch to Edit on the new object so further tweaks are dirty-tracked.
         $ctx.ModeEdit.Checked = $true
         Import-UserIntoForm -User (Get-UserById -Id $newId)
+        Set-Progress "Created $newUpn -- now editing. Complete the remaining details, or choose another user."
         return
     }
 
@@ -1109,12 +1174,14 @@ function Invoke-SaveGroup {
         $failures += Add-PeopleToGroup -GroupId $gid -Field $ownField -AsOwner
         $failures += Add-PeopleToGroup -GroupId $gid -Field $memField
 
-        Set-Progress "Created group $(Get-GraphVal $created 'displayName')."
-        $cmsg = "Group created:`n$(Get-GraphVal $created 'displayName')"
+        $gName = Get-GraphVal $created 'displayName'
+        $cmsg = "Group created:`n$gName"
         if ($failures.Count) { $cmsg += "`n`nBut some members/owners were not added:`n  " + ($failures -join "`n  ") }
+        $cmsg += "`n`nNow switching to Edit mode so you can adjust details, members, and owners."
         [System.Windows.Forms.MessageBox]::Show($cmsg, $(if ($failures.Count) { 'Group created with warnings' } else { 'Group created' }), 'OK', $(if ($failures.Count) { 'Warning' } else { 'Information' })) | Out-Null
         $ctx.ModeEdit.Checked = $true
         Import-GroupIntoForm -Group (Get-GroupById -Id $gid)
+        Set-Progress "Created $gName -- now editing. Adjust details, members, and owners, or choose another group."
         return
     }
 

@@ -455,6 +455,31 @@ $peopleResult = & $mod {
 }
 Assert-That 'List-of-hashtables person round-trip (5.1 binder guard)' { $peopleResult.Count -eq 2 -and $peopleResult.ArrOk }
 
+Write-Host "`n== Theme / design rules ==" -ForegroundColor Cyan
+Assert-That 'secondary button border uses Accent (>=3:1 on white), not Brand cyan (2.53:1)' {
+    & $mod {
+        $b = New-Object System.Windows.Forms.Button; Set-SecondaryButtonStyle $b
+        $t = Get-Theme
+        ($b.FlatAppearance.BorderColor.ToArgb() -eq $t.Accent.ToArgb()) -and `
+        ($b.FlatAppearance.BorderColor.ToArgb() -ne $t.Brand.ToArgb())
+    }
+}
+Assert-That 'AccentHover is darker than Accent (hover keeps white text above AA)' {
+    $t = & $mod { Get-Theme }
+    $t.AccentHover.GetBrightness() -lt $t.Accent.GetBrightness()
+}
+Assert-That 'danger (Delete) style puts the red on the border, not just the glyph' {
+    & $mod {
+        $b = New-Object System.Windows.Forms.Button; Set-DangerButtonStyle $b
+        $t = Get-Theme
+        ($b.FlatAppearance.BorderColor.ToArgb() -eq $t.ErrText.ToArgb()) -and ($b.ForeColor.ToArgb() -eq $t.ErrText.ToArgb())
+    }
+}
+Assert-That 'section-header font is a clear step above the field-label font' {
+    $t = & $mod { Get-Theme }
+    $t.FontSection.SizeInPoints -gt ($t.FontBase.SizeInPoints + 1)
+}
+
 Write-Host "`n== Validation ==" -ForegroundColor Cyan
 $valid = & $mod {
     $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
@@ -495,7 +520,23 @@ Assert-That 'both tabs built field rows' {
     ($u -gt 0) -and ($g -gt 0)
 }
 Assert-That 'connection label starts disconnected' {
-    (& $mod { $script:UI.ConnLabel.Text }) -eq 'Not connected'
+    # Text carries a state glyph (hollow circle) plus the words; assert the meaningful part.
+    (& $mod { $script:UI.ConnLabel.Text }) -match 'Not connected'
+}
+Assert-That 'disconnected empty-state overlay covers the User form before connect' {
+    # Control.Visible reads the *effective* value (false while the form is never shown), so assert the
+    # structural intent: the overlay exists and is the front-most child of its page (BringToFront -> 0).
+    & $mod {
+        $ov = $script:UI.User.Overlay
+        [bool]$ov -and ($null -ne $ov.Parent) -and ($ov.Parent.Controls.GetChildIndex($ov) -eq 0)
+    }
+}
+Assert-That 'Enter commits the active tab primary (AcceptButton points at that tab Save)' {
+    & $mod {
+        $script:UI.Tabs.SelectedIndex = 0
+        Set-FormAcceptButton
+        [object]::ReferenceEquals($script:UI.Form.AcceptButton, $script:UI.User.SaveBtn)
+    }
 }
 if ($form) { $form.Dispose() }
 Remove-Item Env:\M365UGM_NOLAUNCH -ErrorAction SilentlyContinue
