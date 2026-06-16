@@ -546,6 +546,16 @@ $valid = & $mod {
 }
 Assert-That 'invalid UPN is rejected' { $null -ne $valid.Bad }
 Assert-That 'valid UPN passes'        { $null -eq $valid.Good }
+Assert-That "SyncState ReadOnly field shows 'cloud-only' for null and 'synced' for true (not blank)" {
+    & $mod {
+        $tlp = New-Object System.Windows.Forms.TableLayoutPanel; $tlp.ColumnCount = 2
+        $tt = New-Object System.Windows.Forms.ToolTip
+        $f = New-FieldRow -Attr @{ Name = 'onPremisesSyncEnabled'; Label = 'Directory Synced'; Input = 'ReadOnly'; Writable = $false; Format = 'SyncState' } -Mode 'Edit' -Tlp $tlp -Tooltip $tt
+        Set-FieldValue -Field $f -Value $null;  $cloud  = $f.Main.Text
+        Set-FieldValue -Field $f -Value $true;  $synced = $f.Main.Text
+        ($cloud -match 'cloud-only') -and ($synced -match 'synced from on-prem')
+    }
+}
 
 Write-Host "`n== Headless form build ==" -ForegroundColor Cyan
 $env:M365UGM_NOLAUNCH = '1'
@@ -589,6 +599,13 @@ Assert-That 'Enter commits the active tab primary (AcceptButton points at that t
         $script:UI.Tabs.SelectedIndex = 0
         Set-FormAcceptButton
         [object]::ReferenceEquals($script:UI.Form.AcceptButton, $script:UI.User.SaveBtn)
+    }
+}
+Assert-That 'Sync-ConnectionUi reflects a disconnected attempt (clears selection, label shows Not connected)' {
+    & $mod {
+        $script:State = @{ SelectedUser = @{ id = 'x' }; SelectedGroup = $null }
+        Sync-ConnectionUi   # offline => not connected => must clear selection + show "Not connected"
+        ($null -eq $script:State.SelectedUser) -and ($script:UI.ConnLabel.Text -match 'Not connected')
     }
 }
 if ($form) { $form.Dispose() }

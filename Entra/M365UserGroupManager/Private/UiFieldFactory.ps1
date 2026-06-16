@@ -469,7 +469,15 @@ function Set-FieldValue {
     <# Prefill a scalar field from a Graph value. Person/License/GroupType have dedicated setters. #>
     param($Field, $Value)
     switch ($Field.Kind) {
-        { $_ -in 'Text', 'ReadOnly', 'ExtAttr' } { $Field.Main.Text = [string](Format-Cell $Value) }
+        { $_ -in 'Text', 'ReadOnly', 'ExtAttr' } {
+            if ($Field.Attr.Format -eq 'SyncState') {
+                # onPremisesSyncEnabled is $true when synced from on-prem AD, and absent/$null for a
+                # cloud-only object -- render that explicitly instead of leaving the box blank.
+                $Field.Main.Text = if ($Value -eq $true) { 'Yes -- synced from on-premises AD' } else { 'No -- cloud-only' }
+            } else {
+                $Field.Main.Text = [string](Format-Cell $Value)
+            }
+        }
         'Upn' {
             $sv = [string](Format-Cell $Value)
             if ($sv -match '^(.+?)@(.+)$') {

@@ -522,6 +522,22 @@ function Update-ConnectionLabel {
     Set-TabActionState -Tab 'Group'
 }
 
+function Sync-ConnectionUi {
+    <# Refresh all connection-dependent UI to the ACTUAL current Graph state. Safe after any
+       connect/switch/disconnect attempt -- success OR failure. When the attempt left us disconnected
+       (e.g. a cancelled sign-in, since "sign in new" must disconnect first to show the chooser), it
+       also clears the loaded object + hybrid/SKU caches so a stale selection can't linger behind a
+       label that wrongly says "Connected". #>
+    if (-not (Test-GraphConnected)) {
+        $script:State.SelectedUser = $null
+        $script:State.SelectedGroup = $null
+        Reset-HybridState
+        $script:SkuMap = @{}
+    }
+    Update-ConnectionLabel        # also re-runs Set-TabActionState for both tabs (re-shows the connect overlay if disconnected)
+    Update-ExchangeActivation
+}
+
 function Save-CurrentAccount {
     <# Remember the currently-connected account (keyed by tenant id) for one-click switching. #>
     $ctx = Get-GraphContextSafe
@@ -575,8 +591,16 @@ function Connect-NewAccount {
         $ctx = Connect-Tenant
         if ($ctx) { Complete-Connection -Context $ctx }
     } catch {
-        Set-Progress 'Connection failed.'
-        [System.Windows.Forms.MessageBox]::Show("Could not connect:`n$($_.Exception.Message)", 'Connection error', 'OK', 'Error') | Out-Null
+        # We disconnected first to force the account chooser, so a cancel/failure leaves us signed out.
+        # Refresh the UI to that truth (the label must not keep saying "Connected"), then explain.
+        Sync-ConnectionUi
+        if ($_.Exception.Message -match 'cancel') {
+            Set-Progress 'Sign-in cancelled -- not connected.'
+            [System.Windows.Forms.MessageBox]::Show("Sign-in was cancelled, so you're now signed out. Click Connect to sign in.", 'Sign-in cancelled', 'OK', 'Information') | Out-Null
+        } else {
+            Set-Progress 'Connection failed.'
+            [System.Windows.Forms.MessageBox]::Show("Could not connect:`n$($_.Exception.Message)", 'Connection error', 'OK', 'Error') | Out-Null
+        }
     } finally {
         Set-UiBusy $false
     }
@@ -613,9 +637,14 @@ function Invoke-Account {
         $ctx = Switch-Tenant -TenantId $choice.TenantId      # silent if the token is still cached
         if ($ctx) { Complete-Connection -Context $ctx }
     } catch {
-        Set-Progress 'Switch failed.'
-        [System.Windows.Forms.MessageBox]::Show("Could not switch account:`n$($_.Exception.Message)", 'Switch error', 'OK', 'Error') | Out-Null
-        Update-ConnectionLabel
+        Sync-ConnectionUi   # reflect the real post-attempt state (don't leave a stale "Connected" label)
+        if ($_.Exception.Message -match 'cancel') {
+            Set-Progress 'Switch cancelled.'
+            [System.Windows.Forms.MessageBox]::Show("Account switch was cancelled. $(if (Test-GraphConnected) { 'You are still on the previous account.' } else { 'You are now signed out -- click Connect to sign in.' })", 'Switch cancelled', 'OK', 'Information') | Out-Null
+        } else {
+            Set-Progress 'Switch failed.'
+            [System.Windows.Forms.MessageBox]::Show("Could not switch account:`n$($_.Exception.Message)", 'Switch error', 'OK', 'Error') | Out-Null
+        }
     } finally {
         Set-UiBusy $false
     }

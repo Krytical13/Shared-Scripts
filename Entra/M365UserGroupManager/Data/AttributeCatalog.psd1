@@ -125,7 +125,7 @@
         @{
             Name = 'Directory Sync (read-only)'
             Attributes = @(
-                @{ Name = 'onPremisesSyncEnabled';       Label = 'Directory Synced';       Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $true }
+                @{ Name = 'onPremisesSyncEnabled';       Label = 'Directory Synced';       Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $true; Format = 'SyncState'; Help = 'whether this object is synced from on-premises Active Directory (cloud-only objects report this as empty in Graph)' }
                 @{ Name = 'onPremisesSamAccountName';    Label = 'On-prem SamAccountName'; Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false }
                 @{ Name = 'onPremisesUserPrincipalName'; Label = 'On-prem UPN';            Input = 'ReadOnly'; Writable = $false; Required = $false; DefaultShow = $false }
             )
