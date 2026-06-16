@@ -739,6 +739,40 @@ Assert-That 'Sync-ConnectionUi reflects a disconnected attempt (clears selection
     }
 }
 if ($form) { $form.Dispose() }
+
+# Live show-smoke: actually Show() the form + pump the real message loop + rebuild + nav-switch, with a
+# thread-exception capture. This catches SHOW-TIME crashes that the headless DrawToBitmap path misses
+# (e.g. the SetWindowTheme "Visual Style handle creation" failure shipped once because builds looked
+# fine). Skips cleanly (not a failure) if the host can't show a window (true-headless / no desktop).
+Write-Host "`n== Live show smoke ==" -ForegroundColor Cyan
+$smokeErrs = New-Object System.Collections.ArrayList
+$smokeHandler = [System.Threading.ThreadExceptionEventHandler] { param($s, $e) [void]$smokeErrs.Add($e.Exception.Message) }
+[System.Windows.Forms.Application]::add_ThreadException($smokeHandler)
+$smokeShown = $false
+try {
+    & $mod {
+        $script:AppReady = $false; $script:Config = New-DefaultConfig
+        $script:VerifiedDomains = @(@{ Name = 'contoso.com'; IsDefault = $true })
+        $f = New-MainForm
+        $f.StartPosition = 'Manual'; $f.Location = New-Object System.Drawing.Point(-3000, -3000); $f.ShowInTaskbar = $false
+        $f.Show()
+        1..12 | ForEach-Object { [System.Windows.Forms.Application]::DoEvents() }
+        Build-TabForm -Tab 'User'; Build-TabForm -Tab 'Group'
+        Select-NavPage -Page 'Group'; Select-NavPage -Page 'Exchange'; Select-NavPage -Page 'User'
+        1..12 | ForEach-Object { [System.Windows.Forms.Application]::DoEvents() }
+        $f.Close(); $f.Dispose()
+    }
+    $smokeShown = $true
+} catch {
+    Write-Host "  (skipped -- host can't Show() a window: $($_.Exception.Message))" -ForegroundColor DarkGray
+}
+[System.Windows.Forms.Application]::remove_ThreadException($smokeHandler)
+if ($smokeShown) {
+    Assert-That 'live Show() + rebuild + nav-switch raises NO thread exceptions' {
+        if ($smokeErrs.Count) { $smokeErrs | ForEach-Object { Write-Host "        $_" -ForegroundColor Yellow } }
+        $smokeErrs.Count -eq 0
+    }
+}
 Remove-Item Env:\M365UGM_NOLAUNCH -ErrorAction SilentlyContinue
 
 Write-Host "`n== Summary ==" -ForegroundColor Cyan
