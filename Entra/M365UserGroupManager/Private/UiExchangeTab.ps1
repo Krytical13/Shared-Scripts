@@ -30,7 +30,7 @@ function New-ExchangeTab {
     $content.FlowDirection = 'TopDown'; $content.WrapContents = $false; $content.AutoSize = $true
     $content.AutoSizeMode = 'GrowAndShrink'; $content.Anchor = 'None'
     $title = New-Object System.Windows.Forms.Label
-    $title.Text = 'Exchange Online'; $title.Font = $t.FontLarge; $title.ForeColor = $t.Accent; $title.AutoSize = $true
+    $title.Text = 'Exchange Online'; $title.Font = $t.FontLarge; $title.ForeColor = $t.Header; $title.AutoSize = $true
     $title.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 6)
     $explain = New-Object System.Windows.Forms.Label
     $explain.Text = "Distribution lists, mail-enabled security groups, and shared, room, and equipment mailboxes are managed through Exchange Online -- a separate sign-in from Microsoft Graph."
@@ -241,7 +241,7 @@ function Build-ExchangeForm {
         if ($item.Header) {
             $hdr = New-Object System.Windows.Forms.Label
             $hdr.Text = $item.Header; $hdr.UseMnemonic = $false; $hdr.AutoSize = $true
-            $hdr.Font = $t.FontMedium; $hdr.ForeColor = $t.Accent
+            $hdr.Font = $t.FontSection; $hdr.ForeColor = $t.Header
             $hdr.Margin = New-Object System.Windows.Forms.Padding(3, $(if ($firstHeader) { 2 } else { 16 }), 3, 4)
             $tlp.Controls.Add($hdr, 0, $row); $tlp.SetColumnSpan($hdr, 2); $firstHeader = $false
         } else {
@@ -262,6 +262,7 @@ function Build-ExchangeForm {
     } finally {
         $tlp.ResumeLayout()
     }
+    Set-ControlTheme -Root $tlp   # dark-theme the freshly (re)built Exchange field controls
     $ex.SaveBtn.Text = if ($ex.Mode -eq 'New') { '&Create' } else { '&Save changes' }
     Set-ExchangeActionState
 }

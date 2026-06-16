@@ -22,7 +22,8 @@ function New-MainForm {
     $form.StartPosition = 'CenterScreen'
     $form.Font = $t.FontBase
     $form.AutoScaleMode = 'Font'
-    $form.BackColor = $t.Surface
+    $form.BackColor = $t.AppBg
+    $form.ForeColor = $t.Text     # ambient: plain labels inherit light text on the dark theme
     try { $form.Icon = [System.Drawing.SystemIcons]::Application } catch { }
 
     $tooltip = New-Object System.Windows.Forms.ToolTip
@@ -100,6 +101,7 @@ function New-MainForm {
     # silently adopting the last/persisted session. Plain scriptblock keeps module affinity.
     $form.Add_Shown({ Invoke-StartupConnect })
 
+    Set-ControlTheme -Root $form   # dark-theme the input controls (text/combo/list) that don't inherit it
     return $form
 }
 
@@ -177,7 +179,7 @@ function New-EntityTab {
     if ($Tab -eq 'User') {
         $guestBox = New-Object System.Windows.Forms.GroupBox
         $guestBox.Text = ' Guest invitation '; $guestBox.Dock = 'Fill'; $guestBox.Visible = $false
-        $guestBox.BackColor = $t.SurfaceAlt; $guestBox.ForeColor = $t.Accent
+        $guestBox.BackColor = $t.SurfaceAlt; $guestBox.ForeColor = $t.Header
         $guestBox.Margin = New-Object System.Windows.Forms.Padding(4, 6, 18, 6); $guestBox.Padding = New-Object System.Windows.Forms.Padding(14, 8, 14, 12)
         $gtlp = New-Object System.Windows.Forms.TableLayoutPanel
         $gtlp.Dock = 'Top'; $gtlp.ColumnCount = 2; $gtlp.AutoSize = $true; $gtlp.AutoSizeMode = 'GrowAndShrink'
@@ -238,7 +240,7 @@ function New-EntityTab {
     $ovContent.FlowDirection = 'TopDown'; $ovContent.WrapContents = $false; $ovContent.AutoSize = $true
     $ovContent.AutoSizeMode = 'GrowAndShrink'; $ovContent.Anchor = 'None'
     $ovTitle = New-Object System.Windows.Forms.Label
-    $ovTitle.Text = "Manage $($Title.ToLower())"; $ovTitle.Font = $t.FontLarge; $ovTitle.ForeColor = $t.Accent; $ovTitle.AutoSize = $true
+    $ovTitle.Text = "Manage $($Title.ToLower())"; $ovTitle.Font = $t.FontLarge; $ovTitle.ForeColor = $t.Header; $ovTitle.AutoSize = $true
     $ovTitle.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 6)
     $ovExplain = New-Object System.Windows.Forms.Label
     $ovExplain.Text = "Create a new $entityWord or edit an existing one. Connect to Microsoft 365 to begin."
@@ -351,7 +353,7 @@ function Build-TabForm {
             $hdr.UseMnemonic = $false   # render literal '&' in names like "Identity & Sign-in"
             $hdr.AutoSize = $true
             $hdr.Font = $t.FontSection   # a clear step above the 9pt field labels (was 9.5, nearly identical)
-            $hdr.ForeColor = $t.Accent
+            $hdr.ForeColor = $t.Header
             $hdr.Margin = New-Object System.Windows.Forms.Padding(3, $(if ($firstHeader) { 2 } else { 16 }), 3, 4)
             $tlp.Controls.Add($hdr, 0, $row)
             $tlp.SetColumnSpan($hdr, 2)
@@ -429,6 +431,7 @@ function Build-TabForm {
     }
 
     $tlp.ResumeLayout()
+    Set-ControlTheme -Root $tlp   # dark-theme the freshly (re)built field controls
     $ctx.SaveBtn.Text = if ($ctx.Mode -eq 'New') { "&Create $(if ($Tab -eq 'User') { 'user' } else { 'group' })" } else { '&Save changes' }
     Set-TabActionState -Tab $Tab
 }

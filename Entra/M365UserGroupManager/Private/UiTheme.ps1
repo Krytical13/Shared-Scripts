@@ -8,43 +8,54 @@
 
 function Get-Theme {
     if (-not $script:Theme) {
-        # Palette: brand cyan (#00AEEF) stays as the bright *decorative* accent (top
-        # rule, selection) where WCAG non-text-contrast rules are relaxed; a deeper cyan (#016595)
-        # carries every *functional* element -- section headers, primary fill, secondary borders --
-        # because it clears WCAG AA: white-on-#016595 = 6.37:1 and #016595-on-white = 6.37:1, where
-        # the old #0277A8 sat on the 4.99:1 knife-edge and Brand cyan on white is only 2.53:1 (below
-        # the 3:1 SC 1.4.11 floor for a control boundary). AccentHover goes *darker* (#015076, white
-        # text 8.7:1) so hover never drops contrast. All System.Drawing.Color -> identical on PS 5.1/7.
+        # DARK palette (bright cyan on dark slate). Contrasts are WCAG-AA verified:
+        #   Text  #E6EDF3 on Surface #161B22  = ~13:1   Muted #8B949E on Surface = ~5.2:1
+        #   Header/Brand cyan #00AEEF on Surface = ~7.1:1 (bright headers read on dark)
+        #   White on Accent fill #0277A8 = 4.99:1       CtrlBorder #6E7681 on Surface = ~3.6:1 (SC 1.4.11)
+        # Two cyans by role: bright Brand #00AEEF for headers / selection / focus / accents (text-on-dark);
+        # deeper Accent #0277A8 for the one primary FILL per row (so white button text stays >=4.5:1).
+        # All System.Drawing.Color -> identical on Windows PowerShell 5.1 and 7.
         $script:Theme = @{
-            Brand       = [System.Drawing.Color]::FromArgb(0, 174, 239)    # #00AEEF -- decorative accent / selection only
-            Accent      = [System.Drawing.Color]::FromArgb(1, 101, 149)    # #016595 -- headers + primary fill + control borders (6.37:1)
-            AccentHover = [System.Drawing.Color]::FromArgb(1, 80, 118)     # #015076 -- darker hover, white text 8.7:1
-            Surface     = [System.Drawing.Color]::White                    # form / field background
-            SurfaceAlt  = [System.Drawing.Color]::FromArgb(240, 249, 253)  # very light cyan tint (bars / panels)
-            Text        = [System.Drawing.Color]::FromArgb(26, 43, 51)     # main text (dark slate)
-            Muted       = [System.Drawing.Color]::FromArgb(91, 103, 112)   # secondary text (5.4:1 on white / SurfaceAlt)
-            Border      = [System.Drawing.Color]::FromArgb(203, 217, 224)  # subtle borders (decorative only)
-            OkText      = [System.Drawing.Color]::FromArgb(0, 120, 90)
-            OkBack      = [System.Drawing.Color]::FromArgb(223, 246, 238)
-            ErrText     = [System.Drawing.Color]::FromArgb(178, 34, 34)
-            ErrBack     = [System.Drawing.Color]::FromArgb(251, 233, 233)
-            WarnText    = [System.Drawing.Color]::FromArgb(176, 96, 0)      # "synced from AD" badge
-            BtnFace     = [System.Drawing.Color]::White                    # secondary button bg
-            BtnText     = [System.Drawing.Color]::FromArgb(26, 43, 51)
-            ReadOnlyBg  = [System.Drawing.Color]::FromArgb(240, 244, 246)
-            ProgBack    = [System.Drawing.Color]::FromArgb(227, 238, 243)
+            Mode        = 'Dark'
+            Brand       = [System.Drawing.Color]::FromArgb(0, 174, 239)    # #00AEEF -- bright cyan: selection, focus, top rule, icons
+            Header      = [System.Drawing.Color]::FromArgb(0, 174, 239)    # #00AEEF -- section headers (bright on dark, 7.1:1)
+            Accent      = [System.Drawing.Color]::FromArgb(2, 119, 168)    # #0277A8 -- primary button fill (white text 4.99:1)
+            AccentHover = [System.Drawing.Color]::FromArgb(1, 80, 118)     # #015076 -- DARKER hover so white button text stays >=4.5:1 (8.7:1)
+            AppBg       = [System.Drawing.Color]::FromArgb(13, 17, 23)     # #0D1117 -- window base (behind cards)
+            Surface     = [System.Drawing.Color]::FromArgb(22, 27, 34)     # #161B22 -- cards / page content
+            SurfaceAlt  = [System.Drawing.Color]::FromArgb(28, 33, 40)     # #1C2128 -- header bar / secondary panels
+            NavBg       = [System.Drawing.Color]::FromArgb(16, 20, 27)     # #10141B -- left sidebar
+            NavSelBg    = [System.Drawing.Color]::FromArgb(28, 35, 45)     # #1C232D -- selected nav item fill
+            Text        = [System.Drawing.Color]::FromArgb(230, 237, 243)  # #E6EDF3 -- primary text
+            Muted       = [System.Drawing.Color]::FromArgb(139, 148, 158)  # #8B949E -- secondary text (5.2:1 on Surface)
+            Border      = [System.Drawing.Color]::FromArgb(48, 54, 61)     # #30363D -- subtle card borders (decorative)
+            CtrlBorder  = [System.Drawing.Color]::FromArgb(110, 118, 129)  # #6E7681 -- control/button boundaries (3.6:1, SC 1.4.11)
+            InputBg     = [System.Drawing.Color]::FromArgb(13, 17, 23)     # #0D1117 -- textbox/combo/list background (recessed)
+            OkText      = [System.Drawing.Color]::FromArgb(63, 185, 80)    # #3FB950
+            OkBack      = [System.Drawing.Color]::FromArgb(18, 38, 26)     # #12261A -- dark green tint
+            ErrText     = [System.Drawing.Color]::FromArgb(248, 81, 73)    # #F85149
+            ErrBack     = [System.Drawing.Color]::FromArgb(45, 21, 23)     # #2D1517 -- dark red tint
+            WarnText    = [System.Drawing.Color]::FromArgb(210, 153, 34)   # #D29922 -- "synced from AD" badge
+            BtnFace     = [System.Drawing.Color]::FromArgb(33, 38, 45)     # #21262D -- secondary button fill
+            BtnHover    = [System.Drawing.Color]::FromArgb(45, 51, 59)     # #2D333B -- secondary button hover (brightens)
+            BtnText     = [System.Drawing.Color]::FromArgb(230, 237, 243)  # #E6EDF3
+            ReadOnlyBg  = [System.Drawing.Color]::FromArgb(28, 33, 40)     # #1C2128 -- read-only field bg
+            ProgBack    = [System.Drawing.Color]::FromArgb(28, 33, 40)
             # --- spacing scale (4px base) + shared control heights: one token, no ad-hoc literals ---
             GapSm       = 4
             Gap         = 8
             GapLg       = 16
             BtnH        = 28                                               # secondary / inline buttons
             BtnHPrimary = 34                                               # the one primary action per row
+            NavW        = 220                                              # left sidebar width
             FontBase    = New-Object System.Drawing.Font('Segoe UI', 9)
             FontBold    = New-Object System.Drawing.Font('Segoe UI', 9, [System.Drawing.FontStyle]::Bold)
             FontMedium  = New-Object System.Drawing.Font('Segoe UI', 9.5, [System.Drawing.FontStyle]::Bold)
             FontSection = New-Object System.Drawing.Font('Segoe UI', 10.5, [System.Drawing.FontStyle]::Bold)  # section headers, a clear step above 9pt labels
             FontLarge   = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
-            FontTitle   = New-Object System.Drawing.Font('Segoe UI Semibold', 13)  # on-canvas H1
+            FontTitle   = New-Object System.Drawing.Font('Segoe UI Semibold', 16)  # page H1 in the content header
+            FontNav     = New-Object System.Drawing.Font('Segoe UI', 10)           # sidebar nav items
+            FontNavHdr  = New-Object System.Drawing.Font('Segoe UI', 7.5, [System.Drawing.FontStyle]::Bold) # sidebar section captions
         }
     }
     return $script:Theme
@@ -54,9 +65,9 @@ function Set-SecondaryButtonStyle {
     param([System.Windows.Forms.Button]$Button)
     $t = Get-Theme
     $Button.FlatStyle = 'Flat'
-    $Button.FlatAppearance.BorderColor = $t.Accent          # #016595 = 6.37:1 on white (was Brand 2.53:1, failed SC 1.4.11)
+    $Button.FlatAppearance.BorderColor = $t.CtrlBorder      # #6E7681 = ~3.6:1 on Surface (SC 1.4.11 control boundary)
     $Button.FlatAppearance.BorderSize = 1
-    $Button.FlatAppearance.MouseOverBackColor = $t.SurfaceAlt
+    $Button.FlatAppearance.MouseOverBackColor = $t.BtnHover # dark theme: secondary buttons brighten on hover
     $Button.BackColor = $t.BtnFace
     $Button.ForeColor = $t.BtnText
     $Button.Cursor = [System.Windows.Forms.Cursors]::Hand
@@ -92,6 +103,36 @@ function Set-DangerButtonStyle {
     Set-SecondaryButtonStyle $Button
     $Button.FlatAppearance.BorderColor = $t.ErrText
     $Button.ForeColor = $t.ErrText
+}
+
+function Set-ControlTheme {
+    <#
+        Dark-theme the input controls under $Root that DON'T inherit ambient colors. WinForms TextBox /
+        ComboBox / ListBox / CheckedListBox / ListView render white regardless of their parent, so we
+        set them explicitly. Labels, Panels, GroupBoxes inherit ForeColor/BackColor from the form, so
+        we leave them alone -- preserving intentional header (Brand), muted, and error colors. Buttons
+        keep their style helpers. Idempotent + recursive; call after building a form/dialog and after
+        any rebuild that creates fresh field controls (Build-TabForm / Build-ExchangeForm).
+    #>
+    param([System.Windows.Forms.Control]$Root)
+    if (-not $Root) { return }
+    $t = Get-Theme
+    foreach ($c in $Root.Controls) {
+        switch ($c.GetType().Name) {
+            'TextBox' {
+                $c.BorderStyle = 'FixedSingle'
+                $c.BackColor = if ($c.ReadOnly) { $t.ReadOnlyBg } else { $t.InputBg }
+                $c.ForeColor = $t.Text
+            }
+            'ComboBox'       { $c.FlatStyle = 'Flat'; $c.BackColor = $t.InputBg; $c.ForeColor = $t.Text }
+            'ListBox'        { $c.BorderStyle = 'FixedSingle'; $c.BackColor = $t.InputBg; $c.ForeColor = $t.Text }
+            'CheckedListBox' { $c.BorderStyle = 'FixedSingle'; $c.BackColor = $t.InputBg; $c.ForeColor = $t.Text }
+            'ListView'       { $c.BackColor = $t.InputBg; $c.ForeColor = $t.Text }
+            'DateTimePicker' { $c.CalendarMonthBackground = $t.InputBg; $c.CalendarForeColor = $t.Text }
+            'NumericUpDown'  { $c.BackColor = $t.InputBg; $c.ForeColor = $t.Text }
+        }
+        if ($c.HasChildren) { Set-ControlTheme -Root $c }
+    }
 }
 
 function Set-Progress {

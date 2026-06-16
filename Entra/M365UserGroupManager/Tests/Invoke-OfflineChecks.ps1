@@ -625,13 +625,18 @@ Assert-That 'Resolve target: nothing installed -> null target, everything missin
 }
 
 Write-Host "`n== Theme / design rules ==" -ForegroundColor Cyan
-Assert-That 'secondary button border uses Accent (>=3:1 on white), not Brand cyan (2.53:1)' {
+Assert-That 'dark theme: secondary button border uses the contrast-safe CtrlBorder, not Brand cyan' {
     & $mod {
         $b = New-Object System.Windows.Forms.Button; Set-SecondaryButtonStyle $b
         $t = Get-Theme
-        ($b.FlatAppearance.BorderColor.ToArgb() -eq $t.Accent.ToArgb()) -and `
-        ($b.FlatAppearance.BorderColor.ToArgb() -ne $t.Brand.ToArgb())
+        ($b.FlatAppearance.BorderColor.ToArgb() -eq $t.CtrlBorder.ToArgb()) -and `
+        ($b.FlatAppearance.BorderColor.ToArgb() -ne $t.Brand.ToArgb()) -and `
+        ($b.BackColor.ToArgb() -eq $t.BtnFace.ToArgb())
     }
+}
+Assert-That 'dark theme: palette Mode is Dark and section headers use the bright Header cyan (legible on dark)' {
+    $t = & $mod { Get-Theme }
+    ($t.Mode -eq 'Dark') -and ($t.Header.ToArgb() -eq $t.Brand.ToArgb())
 }
 Assert-That 'AccentHover is darker than Accent (hover keeps white text above AA)' {
     $t = & $mod { Get-Theme }
