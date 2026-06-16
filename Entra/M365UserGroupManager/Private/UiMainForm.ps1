@@ -148,7 +148,6 @@ function New-MainForm {
     # On open, let the user choose which saved account to connect to (when more than one) instead of
     # silently adopting the last/persisted session. Plain scriptblock keeps module affinity.
     $form.Add_Shown({ Invoke-StartupConnect })
-    $form.Add_Shown({ Set-DarkScrollbars -Root $script:UI.Form })   # native scrollbars need a created handle
 
     Set-ControlTheme -Root $form   # dark-theme the input controls (text/combo/list) that don't inherit it
     return $form
@@ -544,7 +543,6 @@ function Build-TabForm {
 
     $tlp.ResumeLayout()
     Set-ControlTheme -Root $tlp     # dark-theme the freshly (re)built field controls
-    Set-DarkScrollbars -Root $tlp   # + their scrollbars (e.g. multiline Description)
     $ctx.SaveBtn.Text = if ($ctx.Mode -eq 'New') { "&Create $(if ($Tab -eq 'User') { 'user' } else { 'group' })" } else { '&Save changes' }
     Set-TabActionState -Tab $Tab
 }
