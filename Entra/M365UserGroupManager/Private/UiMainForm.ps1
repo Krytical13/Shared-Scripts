@@ -128,6 +128,9 @@ function New-EntityTab {
     $left.Dock = 'Fill'; $left.FlowDirection = 'LeftToRight'; $left.WrapContents = $false
     $modeNew = New-Object System.Windows.Forms.RadioButton; $modeNew.Text = "&New $entityWord"; $modeNew.AutoSize = $true; $modeNew.Checked = $true; $modeNew.Margin = New-Object System.Windows.Forms.Padding(3, 10, 8, 3)
     $modeEdit = New-Object System.Windows.Forms.RadioButton; $modeEdit.Text = '&Edit existing'; $modeEdit.AutoSize = $true; $modeEdit.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
+    # Surface the progressive-disclosure model at the point of choice (recognition over recall).
+    $script:UI.Tooltip.SetToolTip($modeNew, "Create a new $entityWord -- shows just the essentials. Complete the rest in Edit after it's created.")
+    $script:UI.Tooltip.SetToolTip($modeEdit, "Modify an existing $entityWord -- shows all the fields you've enabled via Choose fields.")
     # Account type (User tab only): create a Member, or invite an external Guest. These radios MUST
     # live in their own container -- WinForms groups radio buttons by their immediate parent, so
     # putting them in the same panel as New/Edit would make all four one mutually-exclusive group.
