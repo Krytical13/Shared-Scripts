@@ -45,21 +45,12 @@ if (-not $Relaunched -and $PSCommandPath) {
 $ErrorActionPreference = 'Stop'
 $manifestPath = Join-Path $PSScriptRoot 'M365UserGroupManager.psd1'
 
-#region ------------------------------------------------------------- Ensure Graph SDK modules
-$required = (Import-PowerShellDataFile -Path $manifestPath).PrivateData.RequiredGraphModules
-$missing  = @($required | Where-Object { -not (Get-Module -ListAvailable -Name $_) })
-if ($missing.Count -gt 0) {
-    Add-Type -AssemblyName System.Windows.Forms
-    $ans = [System.Windows.Forms.MessageBox]::Show(
-        ("These required Microsoft Graph modules are not installed:`n`n  {0}`n`nInstall them now for the current user (Install-Module -Scope CurrentUser)?" -f ($missing -join "`n  ")),
-        'Install required modules', 'YesNo', 'Question')
-    if ($ans -ne 'Yes') {
-        [System.Windows.Forms.MessageBox]::Show('Cannot continue without the required Microsoft Graph modules.', 'Missing modules', 'OK', 'Warning') | Out-Null
-        return
-    }
-    Install-Module -Name $missing -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
-}
-#endregion
+# NOTE: the Microsoft Graph SDK modules are intentionally NOT installed/imported here. They share the
+# Microsoft.Graph.Authentication assembly, and a mismatched-version install causes the dreaded
+# "assembly with same name is already loaded" failure. Initialize-GraphModule (run on Connect) owns
+# that: it resolves a single coherent version, offers to install/align any laggards, and imports them
+# all pinned to that one version -- so a stale "any version present" check here can't poison the set.
+# This also keeps launch making zero Graph calls (the Connect button stays the sole gate).
 
 # Import fresh (so edits during development are always picked up) and open the window.
 Import-Module $manifestPath -Force

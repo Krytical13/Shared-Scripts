@@ -455,6 +455,59 @@ $peopleResult = & $mod {
 }
 Assert-That 'List-of-hashtables person round-trip (5.1 binder guard)' { $peopleResult.Count -eq 2 -and $peopleResult.ArrOk }
 
+Write-Host "`n== Graph module version coherence ==" -ForegroundColor Cyan
+Assert-That 'ConvertTo-ThreePartVersion normalizes 4-part asm version (2.37.0.0 -> 2.37.0)' {
+    (& $mod { ConvertTo-ThreePartVersion ([version]'2.37.0.0') }) -eq [version]'2.37.0'
+}
+Assert-That 'ConvertTo-ThreePartVersion fills missing build (2.37 -> 2.37.0)' {
+    (& $mod { ConvertTo-ThreePartVersion ([version]'2.37') }) -eq [version]'2.37.0'
+}
+Assert-That "Resolve target: the user's split install (mixed 2.36.1/2.37.0) heals UP to 2.37.0" {
+    & $mod {
+        $req = 'Microsoft.Graph.Authentication','Microsoft.Graph.Users','Microsoft.Graph.Users.Actions','Microsoft.Graph.Groups','Microsoft.Graph.Identity.DirectoryManagement','Microsoft.Graph.Identity.SignIns'
+        $inst = @{
+            'Microsoft.Graph.Authentication'               = [version[]]@('2.36.1','2.37.0')
+            'Microsoft.Graph.Users'                        = [version[]]@('2.36.1')
+            'Microsoft.Graph.Users.Actions'                = [version[]]@('2.37.0')
+            'Microsoft.Graph.Groups'                       = [version[]]@('2.36.1')
+            'Microsoft.Graph.Identity.DirectoryManagement' = [version[]]@('2.36.1')
+            'Microsoft.Graph.Identity.SignIns'             = [version[]]@('2.36.1')
+        }
+        $p = Resolve-GraphTargetVersion -Installed $inst -Required $req
+        ($p.Target -eq [version]'2.37.0') -and ($p.Missing.Count -eq 4) -and
+        ($p.Missing -contains 'Microsoft.Graph.Users') -and ($p.Missing -notcontains 'Microsoft.Graph.Users.Actions') -and
+        ($p.Missing -notcontains 'Microsoft.Graph.Authentication')
+    }
+}
+Assert-That 'Resolve target: a coherent install prefers the common version with NO installs' {
+    & $mod {
+        $req = 'Microsoft.Graph.Authentication','Microsoft.Graph.Users','Microsoft.Graph.Groups'
+        $inst = @{
+            'Microsoft.Graph.Authentication' = [version[]]@('2.36.1')
+            'Microsoft.Graph.Users'          = [version[]]@('2.36.1')
+            'Microsoft.Graph.Groups'         = [version[]]@('2.36.1')
+        }
+        $p = Resolve-GraphTargetVersion -Installed $inst -Required $req
+        ($p.Target -eq [version]'2.36.1') -and ($p.Missing.Count -eq 0)
+    }
+}
+Assert-That 'Resolve target: picks the highest COMMON version when several are shared by all' {
+    & $mod {
+        $req = 'A','B'
+        $inst = @{ 'A' = [version[]]@('2.36.1','2.37.0'); 'B' = [version[]]@('2.36.1','2.37.0') }
+        $p = Resolve-GraphTargetVersion -Installed $inst -Required $req
+        ($p.Target -eq [version]'2.37.0') -and ($p.Missing.Count -eq 0)
+    }
+}
+Assert-That 'Resolve target: nothing installed -> null target, everything missing' {
+    & $mod {
+        $req = 'A','B'
+        $inst = @{ 'A' = [version[]]@(); 'B' = [version[]]@() }
+        $p = Resolve-GraphTargetVersion -Installed $inst -Required $req
+        ($null -eq $p.Target) -and ($p.Missing.Count -eq 2)
+    }
+}
+
 Write-Host "`n== Theme / design rules ==" -ForegroundColor Cyan
 Assert-That 'secondary button border uses Accent (>=3:1 on white), not Brand cyan (2.53:1)' {
     & $mod {
