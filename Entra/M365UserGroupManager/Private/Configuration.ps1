@@ -62,6 +62,7 @@ function New-DefaultConfig {
         Users          = @{ Enabled = (Get-DefaultEnabledNames -Tab 'User') }
         Groups         = @{ Enabled = (Get-DefaultEnabledNames -Tab 'Group') }
         LastOnPremOuDn = ''   # last OU chosen for an on-prem AD user create (preselected next time)
+        ConnectServer  = ''   # Entra Connect server override/fallback when cloud autofill can't name it
     }
 }
 

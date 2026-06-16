@@ -19,7 +19,8 @@ $script:GraphScopes = @(
     'GroupMember.ReadWrite.All'
     'Organization.Read.All'
     'LicenseAssignment.ReadWrite.All'
-    'User.Invite.All'                  # send B2B guest invitations (New-MgInvitation)
+    'User.Invite.All'                          # send B2B guest invitations (New-MgInvitation)
+    'OnPremDirectorySynchronization.Read.All'  # read the Connect server name for the force-sync autofill (best-effort; degrades to a prompt if not consented)
 )
 
 function ConvertTo-ThreePartVersion {

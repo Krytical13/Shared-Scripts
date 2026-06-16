@@ -64,7 +64,7 @@ function New-MainForm {
     # Connection block, pinned to the sidebar bottom.
     $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
     $connPanel.Dock = 'Fill'; $connPanel.AutoSize = $true; $connPanel.AutoSizeMode = 'GrowAndShrink'
-    $connPanel.ColumnCount = 1; $connPanel.RowCount = 3; $connPanel.BackColor = $t.NavBg
+    $connPanel.ColumnCount = 1; $connPanel.RowCount = 4; $connPanel.BackColor = $t.NavBg
     $connPanel.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 14)
     [void]$connPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $connLabel = New-Object System.Windows.Forms.Label
@@ -74,7 +74,10 @@ function New-MainForm {
     $connectBtn.Text = '&Connect'; $connectBtn.Dock = 'Fill'; $connectBtn.Height = $t.BtnHPrimary; $connectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 2, 3, 6)
     $disconnectBtn = New-Object System.Windows.Forms.Button
     $disconnectBtn.Text = 'Dis&connect'; $disconnectBtn.Dock = 'Fill'; $disconnectBtn.Height = $t.BtnH; $disconnectBtn.Enabled = $false; $disconnectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 0)
-    $connPanel.Controls.Add($connLabel, 0, 0); $connPanel.Controls.Add($connectBtn, 0, 1); $connPanel.Controls.Add($disconnectBtn, 0, 2)
+    # Force a directory sync (hybrid tenants only) -- shown by Update-ConnectionLabel when synced.
+    $syncBtn = New-Object System.Windows.Forms.Button
+    $syncBtn.Text = 'Force AD &sync'; $syncBtn.Dock = 'Fill'; $syncBtn.Height = $t.BtnH; $syncBtn.Visible = $false; $syncBtn.Margin = New-Object System.Windows.Forms.Padding(3, 8, 3, 0)
+    $connPanel.Controls.Add($connLabel, 0, 0); $connPanel.Controls.Add($connectBtn, 0, 1); $connPanel.Controls.Add($disconnectBtn, 0, 2); $connPanel.Controls.Add($syncBtn, 0, 3)
 
     $nav.Controls.Add($brand, 0, 0); $nav.Controls.Add($cap, 0, 1)
     $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4)
@@ -117,7 +120,7 @@ function New-MainForm {
     # --- Stash core handles, then build the pages ------------------------------------------
     $script:UI = @{
         Form = $form; Tooltip = $tooltip; ErrorProvider = $errorProvider
-        ConnectBtn = $connectBtn; DisconnectBtn = $disconnectBtn
+        ConnectBtn = $connectBtn; DisconnectBtn = $disconnectBtn; SyncBtn = $syncBtn
         ConnLabel = $connLabel; Status = $status; Progress = $progress
         NavPanel = $nav; PageHost = $pageHost; HeaderTitle = $hdrTitle; CurrentPage = 'User'
         NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button }
@@ -140,8 +143,20 @@ function New-MainForm {
     }
     Set-PrimaryButtonStyle $connectBtn        # the main call-to-action in the sidebar
     Set-SecondaryButtonStyle $disconnectBtn
+    Set-SecondaryButtonStyle $syncBtn
+    $script:UI.Tooltip.SetToolTip($syncBtn, 'Force a Microsoft Entra Connect delta sync and let recent on-prem changes appear in Entra now')
     $connectBtn.Add_Click({ Invoke-Account })
     $disconnectBtn.Add_Click({ Invoke-Disconnect })
+    $syncBtn.Add_Click({
+        Set-UiBusy $true
+        try {
+            $r = Invoke-ForceDirectorySync
+            if ($r.Forced) { [System.Windows.Forms.MessageBox]::Show("A delta sync was started on $($r.Server). Recent changes will appear in Entra shortly.", 'Sync started', 'OK', 'Information') | Out-Null }
+        } catch {
+            Set-Progress 'Sync failed.'
+            [System.Windows.Forms.MessageBox]::Show("Couldn't force a sync:`n$($_.Exception.Message)", 'Sync error', 'OK', 'Error') | Out-Null
+        } finally { Set-UiBusy $false }
+    })
 
     Select-NavPage -Page 'User'   # show first page, select its nav item, set header + AcceptButton
 
@@ -860,12 +875,15 @@ function Update-ConnectionLabel {
         $script:UI.ConnLabel.BackColor = $t.OkBack
         $script:UI.ConnectBtn.Text = '&Switch account...'
         $script:UI.DisconnectBtn.Enabled = $true
+        # Force-sync only makes sense for a directory-synced (hybrid) tenant.
+        if ($script:UI.SyncBtn) { try { $script:UI.SyncBtn.Visible = [bool](Get-TenantHybridState) } catch { $script:UI.SyncBtn.Visible = $false } }
     } else {
         $script:UI.ConnLabel.Text = "$([char]0x25CB) Not connected"
         $script:UI.ConnLabel.ForeColor = $t.ErrText
         $script:UI.ConnLabel.BackColor = $t.ErrBack
         $script:UI.ConnectBtn.Text = '&Connect'
         $script:UI.DisconnectBtn.Enabled = $false
+        if ($script:UI.SyncBtn) { $script:UI.SyncBtn.Visible = $false }
     }
     Set-TabActionState -Tab 'User'
     Set-TabActionState -Tab 'Group'
@@ -1649,11 +1667,109 @@ function Invoke-CreateUserInAd {
 
     $msg = "User created in Active Directory:`n$upn`nin $ouDn`n`nIt will appear in Microsoft 365 after the next Microsoft Entra Connect sync (typically within ~30 minutes). Licenses and Usage Location are cloud properties -- set them on this user in Edit mode once it has synced."
     if ($warnings.Count) { $msg += "`n`nNotes:`n  " + ($warnings -join "`n  ") }
-    [System.Windows.Forms.MessageBox]::Show($msg, 'User created in AD', 'OK', 'Information') | Out-Null
-    Set-Progress "Created $upn in Active Directory -- it will sync to Entra shortly."
+    Set-Progress "Created $upn in Active Directory."
 
-    # The object doesn't exist in Entra yet, so do NOT switch to Edit/reload. Reset to a fresh New form.
+    # Offer to force a directory sync now and wait for the user to land in Entra, instead of waiting ~30 min.
+    $offer = [System.Windows.Forms.MessageBox]::Show("$msg`n`nForce a directory sync now and wait for it to appear in Entra?", 'User created in AD', 'YesNo', 'Question')
+    if ($offer -eq 'Yes') {
+        $r = Invoke-ForceDirectorySync -NoConfirm
+        if ($r.Forced) {
+            if (Wait-ForSyncedUser -Upn $upn -TimeoutSec 300) {
+                [System.Windows.Forms.MessageBox]::Show("$upn has synced to Entra. You can now switch to Edit to set licenses / usage location.", 'Synced', 'OK', 'Information') | Out-Null
+            } else {
+                [System.Windows.Forms.MessageBox]::Show("Sync was forced on $($r.Server), but $upn hasn't appeared in Entra yet. It should arrive shortly -- check Edit > Select user in a minute.", 'Sync pending', 'OK', 'Information') | Out-Null
+            }
+        }
+    }
+
+    # The object doesn't exist in Entra yet (or just arrived), so reset to a fresh New form rather than
+    # auto-switching to Edit on it.
     Set-TabMode -Tab 'User' -Mode 'New'
+}
+
+function Show-TextInput {
+    <# Minimal themed text-input dialog. Returns the entered string, or $null on cancel. #>
+    param([string]$Title, [string]$Prompt, [string]$Default = '')
+    $t = Get-Theme
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = $Title; $dlg.Size = New-Object System.Drawing.Size(460, 200); $dlg.StartPosition = 'CenterParent'
+    $dlg.FormBorderStyle = 'FixedDialog'; $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false; $dlg.Font = $t.FontBase; $dlg.ShowInTaskbar = $false
+    $lbl = New-Object System.Windows.Forms.Label; $lbl.Text = $Prompt; $lbl.Location = New-Object System.Drawing.Point(14, 14); $lbl.Size = New-Object System.Drawing.Size(420, 70)
+    $box = New-Object System.Windows.Forms.TextBox; $box.Text = $Default; $box.Location = New-Object System.Drawing.Point(14, 92); $box.Size = New-Object System.Drawing.Size(420, 24)
+    $ok = New-Object System.Windows.Forms.Button; $ok.Text = 'OK'; $ok.DialogResult = 'OK'; $ok.Location = New-Object System.Drawing.Point(264, 126); $ok.Size = New-Object System.Drawing.Size(84, 28)
+    $cancel = New-Object System.Windows.Forms.Button; $cancel.Text = 'Cancel'; $cancel.DialogResult = 'Cancel'; $cancel.Location = New-Object System.Drawing.Point(352, 126); $cancel.Size = New-Object System.Drawing.Size(84, 28)
+    $dlg.Controls.AddRange(@($lbl, $box, $ok, $cancel)); $dlg.AcceptButton = $ok; $dlg.CancelButton = $cancel
+    Set-DialogTheme -Form $dlg; Set-PrimaryButtonStyle $ok
+    $res = $dlg.ShowDialog(); $val = $box.Text; $dlg.Dispose()
+    if ($res -eq 'OK' -and -not [string]::IsNullOrWhiteSpace($val)) { return $val.Trim() }
+    return $null
+}
+
+function Invoke-ForceDirectorySync {
+    <#
+        Detect the Entra Connect server (cloud autofill -> persisted -> prompt), confirm reachability +
+        that it's the active exporter, then force a delta sync. Returns @{ Forced; Server; Reason }.
+        -NoConfirm skips the confirm dialog (the post-create path already asked). Best-effort throughout;
+        every failure mode reports a clear message and returns Forced=$false.
+    #>
+    param([switch]$NoConfirm)
+    if (-not (Test-GraphConnected)) { [System.Windows.Forms.MessageBox]::Show('Connect first.', 'Not connected', 'OK', 'Information') | Out-Null; return @{ Forced = $false } }
+
+    Set-Progress 'Locating the Entra Connect server...'
+    $info = Get-EntraConnectSyncInfo
+    $name = if ($info -and $info.ServerName) { $info.ServerName } elseif ($script:Config.ConnectServer) { [string]$script:Config.ConnectServer } else { $null }
+    if (-not $name) {
+        $name = Show-TextInput -Title 'Entra Connect server' -Prompt "Couldn't auto-detect the Microsoft Entra Connect server from the cloud. Enter its name or FQDN:" -Default ''
+        if (-not $name) { return @{ Forced = $false; Reason = 'No server specified.' } }
+    }
+    $fqdn = Resolve-ServerFqdn -Name $name
+    $script:Config.ConnectServer = $name; try { Save-AppConfig -Config $script:Config } catch { }
+
+    if (-not $NoConfirm) {
+        $pending = if ($info) { "`n($($info.PendingAdds) add / $($info.PendingUpdates) update pending export.)" } else { '' }
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            "Force a Microsoft Entra Connect delta sync on:`n$fqdn$pending`n`nThis runs Start-ADSyncSyncCycle on that server over WinRM (your Windows account needs admin rights there). Continue?",
+            'Force directory sync', 'YesNo', 'Question')
+        if ($confirm -ne 'Yes') { return @{ Forced = $false; Reason = 'Cancelled.' } }
+    }
+
+    Set-Progress "Reaching $fqdn over WinRM..."
+    if (-not (Test-ConnectServerReachable -Server $fqdn)) {
+        [System.Windows.Forms.MessageBox]::Show("Couldn't reach $fqdn over WinRM. Check VPN/connectivity and that PowerShell remoting (WinRM) is enabled on the Connect server.", 'Not reachable', 'OK', 'Warning') | Out-Null
+        return @{ Forced = $false; Server = $fqdn; Reason = 'WinRM unreachable.' }
+    }
+    $state = Get-RemoteAdSyncState -Server $fqdn
+    if ($state.Error) {
+        [System.Windows.Forms.MessageBox]::Show("Couldn't query the sync server $fqdn`:`n$($state.Error)`n`n(You need admin rights on it, and it must be a Microsoft Entra Connect server -- not Cloud Sync.)", 'Sync server', 'OK', 'Warning') | Out-Null
+        return @{ Forced = $false; Server = $fqdn; Reason = $state.Error }
+    }
+    $allowed = Test-AdSyncForceAllowed -Scheduler $state.Scheduler -Busy $state.Busy
+    if (-not $allowed.Allowed) {
+        [System.Windows.Forms.MessageBox]::Show($allowed.Reason, 'Sync not forced', 'OK', 'Information') | Out-Null
+        return @{ Forced = $false; Server = $fqdn; Reason = $allowed.Reason }
+    }
+    Set-Progress "Forcing a delta sync on $fqdn..."
+    $r = Invoke-RemoteAdSyncDelta -Server $fqdn
+    if ($r.Error) {
+        [System.Windows.Forms.MessageBox]::Show("Couldn't start the sync on $fqdn`:`n$($r.Error)", 'Sync error', 'OK', 'Error') | Out-Null
+        return @{ Forced = $false; Server = $fqdn; Reason = $r.Error }
+    }
+    Set-Progress "Delta sync started on $fqdn."
+    return @{ Forced = $true; Server = $fqdn }
+}
+
+function Wait-ForSyncedUser {
+    <# Poll Entra (Get-MgUser by UPN) until the just-created on-prem user appears, or timeout. Pumps the
+       UI so the window stays responsive. Returns $true if it appeared. #>
+    param([Parameter(Mandatory)][string]$Upn, [int]$TimeoutSec = 300)
+    $q = $Upn.Replace("'", "''")
+    $deadline = [datetime]::Now.AddSeconds($TimeoutSec)
+    while ([datetime]::Now -lt $deadline) {
+        Set-Progress "Waiting for $Upn to sync to Entra..."
+        try { if (Get-MgUser -Filter "userPrincipalName eq '$q'" -Top 1 -ErrorAction Stop) { return $true } } catch { }
+        for ($i = 0; $i -lt 20; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 250 }  # ~5s, responsive
+    }
+    return $false
 }
 
 function Invoke-SaveGroup {

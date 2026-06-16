@@ -146,9 +146,9 @@ Assert-That 'attribute Names are unique within each tab' {
 
 Write-Host "`n== Config ==" -ForegroundColor Cyan
 $cfg = & $mod { New-DefaultConfig }
-Assert-That 'default config has accounts list + enabled sets + LastOnPremOuDn' {
+Assert-That 'default config has accounts list + enabled sets + LastOnPremOuDn + ConnectServer' {
     ($null -ne $cfg.Accounts) -and ($cfg.Users.Enabled.Count -gt 0) -and ($cfg.Groups.Enabled.Count -gt 0) -and
-    ($cfg.ContainsKey('LastOnPremOuDn'))
+    ($cfg.ContainsKey('LastOnPremOuDn')) -and ($cfg.ContainsKey('ConnectServer'))
 }
 Assert-That 'config JSON round-trips' {
     $json = $cfg | ConvertTo-Json -Depth 6
@@ -265,6 +265,22 @@ Assert-That 'ConvertTo-NewAdUserParams: native params vs OtherAttributes split; 
         ($r.OtherAttributes['preferredLanguage'] -eq 'en-US') -and ($r.OtherAttributes['extensionAttribute1'] -eq 'X1') -and
         (-not $r.NativeParams.ContainsKey('UserPrincipalName')) -and
         (-not $r.OtherAttributes.ContainsKey('userPrincipalName')) -and (-not $r.OtherAttributes.ContainsKey('mailNickname'))
+    }
+}
+Assert-That 'Test-AdSyncForceAllowed: allows only an active, idle, scheduler-enabled exporter' {
+    & $mod {
+        $ok      = Test-AdSyncForceAllowed -Scheduler ([pscustomobject]@{ SyncCycleEnabled = $true;  StagingModeEnabled = $false }) -Busy $false
+        $staging = Test-AdSyncForceAllowed -Scheduler ([pscustomobject]@{ SyncCycleEnabled = $true;  StagingModeEnabled = $true  }) -Busy $false
+        $disabled= Test-AdSyncForceAllowed -Scheduler ([pscustomobject]@{ SyncCycleEnabled = $false; StagingModeEnabled = $false }) -Busy $false
+        $busy    = Test-AdSyncForceAllowed -Scheduler ([pscustomobject]@{ SyncCycleEnabled = $true;  StagingModeEnabled = $false }) -Busy $true
+        $none    = Test-AdSyncForceAllowed -Scheduler $null -Busy $false
+        $ok.Allowed -and (-not $staging.Allowed) -and (-not $disabled.Allowed) -and (-not $busy.Allowed) -and (-not $none.Allowed)
+    }
+}
+Assert-That 'Get-EntraConnectSyncInfo + force-sync helpers exist (force-sync backend present)' {
+    & $mod {
+        (Get-Command Get-EntraConnectSyncInfo, Resolve-ServerFqdn, Test-ConnectServerReachable,
+            Get-RemoteAdSyncState, Invoke-RemoteAdSyncDelta, Invoke-ForceDirectorySync -ErrorAction SilentlyContinue).Count -eq 6
     }
 }
 
@@ -750,6 +766,9 @@ Assert-That 'User New form has the Create-in (cloud/on-prem) toggle + OU picker 
         $u = $script:UI.User
         [bool]$u.DestPanel -and [bool]$u.DestCloud -and [bool]$u.DestOnPrem -and [bool]$u.OuPanel -and [bool]$u.OuCombo -and $u.DestCloud.Checked
     }
+}
+Assert-That 'sidebar has a Force-AD-sync button, hidden until connected to a hybrid tenant' {
+    & $mod { [bool]$script:UI.SyncBtn -and (-not $script:UI.SyncBtn.Visible) }
 }
 Assert-That 'Exchange tab starts gated (not connected, management panel hidden)' {
     # Note: Control.Visible reports EFFECTIVE visibility (false for any control on a form that was
