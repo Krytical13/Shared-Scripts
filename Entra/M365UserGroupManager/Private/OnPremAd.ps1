@@ -256,6 +256,129 @@ function Set-AdUserManagerFromPerson {
     return $true
 }
 
+# --- On-prem user CREATE (hybrid: create in AD, let Entra Connect sync it up) --------------
+
+function Get-AdSamAccountName {
+    <# PURE: derive a legal sAMAccountName from an alias -- lowercase, strip everything outside a safe
+       subset (letters/digits/./-/_), cap at the legacy 20-char limit. May still need a uniqueness check
+       by the caller (two long aliases can truncate to the same SAM). #>
+    param([string]$Alias)
+    $s = (([string]$Alias).ToLower() -replace '[^a-z0-9.\-_]', '').Trim('.')
+    if ($s.Length -gt 20) { $s = $s.Substring(0, 20) }
+    return $s
+}
+
+function Test-AdSamAccountNameValid {
+    <# PURE: $true if $Sam is a usable sAMAccountName -- 1..20 chars and none of the characters AD
+       forbids: " / \ [ ] : ; | = , + * ? < > #>
+    param([string]$Sam)
+    if ([string]::IsNullOrEmpty($Sam) -or $Sam.Length -gt 20) { return $false }
+    return ($Sam -notmatch '["/\\\[\]:;|=,+*?<>]')
+}
+
+function Get-NewAdUserParamMap {
+    <# Graph (camelCase) -> New-ADUser NATIVE parameter name, for the attributes that have a dedicated
+       cmdlet parameter. Attributes NOT here go through -OtherAttributes (keyed by LDAP name). An attr
+       must NEVER be passed both ways, so this split is what avoids the "cannot be specified in
+       OtherAttributes" conflict. userPrincipalName/sAMAccountName are first-class create params handled
+       by the wrapper; password/manager/enabled have their own wrappers. #>
+    @{
+        displayName    = 'DisplayName'
+        givenName      = 'GivenName'
+        surname        = 'Surname'
+        jobTitle       = 'Title'
+        department     = 'Department'
+        companyName    = 'Company'
+        employeeId     = 'EmployeeID'
+        officeLocation = 'Office'
+        mobilePhone    = 'MobilePhone'
+        businessPhones = 'OfficePhone'
+        streetAddress  = 'StreetAddress'
+        city           = 'City'
+        state          = 'State'
+        postalCode     = 'PostalCode'
+    }
+}
+
+function ConvertTo-NewAdUserParams {
+    <#
+        PURE: split a set of non-empty cloud scalar changes into New-ADUser native parameters and a
+        residual -OtherAttributes hashtable (keyed by LDAP name). Input: @( @{ Name; Value }, ... ).
+        Output: @{ NativeParams = @{DisplayName=...}; OtherAttributes = @{ldap=...} }.
+        Skips empties, and skips userPrincipalName + mailNickname (UPN is a first-class create param;
+        mailNickname is intentionally NOT stamped on-prem -- let Exchange own the mail alias/proxies).
+    #>
+    param([object[]]$Changes)
+    $paramMap = Get-NewAdUserParamMap
+    $ldapMap = Get-CloudToAdAttributeMap
+    $native = @{}; $other = @{}
+    foreach ($c in $Changes) {
+        if (-not $c -or -not $c.Name) { continue }
+        if ($c.Name -in 'userPrincipalName', 'mailNickname') { continue }
+        $v = $c.Value
+        if ($v -is [System.Array]) { $v = @($v | Where-Object { "$_".Trim() }) | Select-Object -First 1 }
+        if ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)) { continue }
+        if ($paramMap.ContainsKey($c.Name))    { $native[$paramMap[$c.Name]] = [string]$v }
+        elseif ($ldapMap.ContainsKey($c.Name)) { $other[$ldapMap[$c.Name]] = [string]$v }
+    }
+    return @{ NativeParams = $native; OtherAttributes = $other }
+}
+
+function Get-AdOrganizationalUnitList {
+    <# OUs (Name/DistinguishedName) for the target-OU picker. Capped + paged so a large forest can't
+       hang the UI; returns @() on any failure so the caller falls back to the default container. #>
+    param([Parameter(Mandatory)][string]$Dc, [int]$Max = 500)
+    try {
+        $ous = Get-ADOrganizationalUnit -Filter * -Server $Dc -ResultSetSize $Max -ResultPageSize 256 -ErrorAction Stop |
+            Select-Object -Property Name, DistinguishedName | Sort-Object DistinguishedName
+        return @($ous | ForEach-Object { @{ Name = [string]$_.Name; DistinguishedName = [string]$_.DistinguishedName } })
+    } catch { return @() }
+}
+
+function Get-AdDefaultUserPath {
+    <# The domain's default Users CONTAINER DN (CN=Users,...) as a fallback OU. Note: it is a container,
+       not an OU, so it won't appear in Get-AdOrganizationalUnitList -- the caller adds it explicitly. #>
+    param([Parameter(Mandatory)][string]$Dc)
+    try { return [string]((Get-ADDomain -Server $Dc -ErrorAction Stop).UsersContainer) } catch { return '' }
+}
+
+function New-AdUserAccount {
+    <#
+        Create an on-prem AD user in $Path on $Dc, then set its password + enable it. New-ADUser makes a
+        DISABLED, password-less account, so order matters: create -> set password -> enable. Native
+        attributes come via $NativeParams (built by ConvertTo-NewAdUserParams); residual attrs via
+        $OtherAttributes. Password is MANDATORY (it's a create). If the password is rejected by domain
+        policy the account exists but stays DISABLED -- we surface that distinctly so the caller can tell
+        the operator to fix it in AD rather than showing a raw exception. Returns the created AD user.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Dc,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$SamAccountName,
+        [Parameter(Mandatory)][string]$UserPrincipalName,
+        [Parameter(Mandatory)][string]$Password,
+        [hashtable]$NativeParams = @{},
+        [hashtable]$OtherAttributes = @{},
+        [bool]$ForceChangeAtLogon = $true,
+        [bool]$Enabled = $true
+    )
+    $p = @{ Server = $Dc; Path = $Path; Name = $Name; SamAccountName = $SamAccountName; UserPrincipalName = $UserPrincipalName; ErrorAction = 'Stop' }
+    foreach ($k in $NativeParams.Keys) { $p[$k] = $NativeParams[$k] }
+    if ($OtherAttributes -and $OtherAttributes.Count) { $p.OtherAttributes = $OtherAttributes }
+    $created = New-ADUser @p -PassThru
+
+    try {
+        Reset-AdUserPasswordValue -AdUser $created -Dc $Dc -Password $Password -ForceChange $ForceChangeAtLogon
+    } catch {
+        throw ("The account '$SamAccountName' was created in Active Directory but is DISABLED -- its password " +
+               "was rejected by the domain password policy ($($_.Exception.Message)). Set a compliant password " +
+               "on it in Active Directory Users and Computers, or delete it and retry with a stronger password.")
+    }
+    if ($Enabled) { Set-AdAccountEnabledState -AdUser $created -Dc $Dc -Enabled $true }
+    return $created
+}
+
 function Sync-AdGroupMembership {
     <#
         Apply an add/remove membership diff to a synced AD group. $Now / $Original are picked person

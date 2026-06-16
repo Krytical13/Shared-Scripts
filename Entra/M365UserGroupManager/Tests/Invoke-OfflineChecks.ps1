@@ -231,6 +231,41 @@ Assert-That 'every on-prem-mastered user scalar field maps to AD (only otherMail
         -not @($unmapped | Where-Object { $_ -ne 'otherMails' })
     }
 }
+Assert-That 'Get-AdSamAccountName: lowercases, strips illegal chars, caps at 20 (legacy SAM limit)' {
+    & $mod {
+        (Get-AdSamAccountName -Alias 'Jane.Doe') -eq 'jane.doe' -and
+        ((Get-AdSamAccountName -Alias 'christopher.alexander.andersson').Length -le 20) -and
+        ((Get-AdSamAccountName -Alias "o'br ien*") -eq 'obrien')   # strips quote / space / asterisk
+    }
+}
+Assert-That 'Test-AdSamAccountNameValid: rejects >20 chars, illegal chars, and empty' {
+    & $mod {
+        (Test-AdSamAccountNameValid -Sam 'jane.doe') -and
+        (-not (Test-AdSamAccountNameValid -Sam ('a' * 21))) -and
+        (-not (Test-AdSamAccountNameValid -Sam 'bad\name')) -and
+        (-not (Test-AdSamAccountNameValid -Sam 'a;b')) -and
+        (-not (Test-AdSamAccountNameValid -Sam ''))
+    }
+}
+Assert-That 'ConvertTo-NewAdUserParams: native params vs OtherAttributes split; UPN + alias excluded' {
+    & $mod {
+        $changes = @(
+            @{ Name = 'displayName'; Value = 'Jane Doe' },
+            @{ Name = 'jobTitle'; Value = 'Engineer' },
+            @{ Name = 'preferredLanguage'; Value = 'en-US' },
+            @{ Name = 'extensionAttribute1'; Value = 'X1' },
+            @{ Name = 'userPrincipalName'; Value = 'jane@contoso.com' },  # first-class create param -> skipped
+            @{ Name = 'mailNickname'; Value = 'jane.doe' },               # Exchange owns it on-prem -> skipped
+            @{ Name = 'department'; Value = '' }                          # empty -> skipped
+        )
+        $r = ConvertTo-NewAdUserParams -Changes $changes
+        ($r.NativeParams['DisplayName'] -eq 'Jane Doe') -and ($r.NativeParams['Title'] -eq 'Engineer') -and
+        (-not $r.NativeParams.ContainsKey('Department')) -and
+        ($r.OtherAttributes['preferredLanguage'] -eq 'en-US') -and ($r.OtherAttributes['extensionAttribute1'] -eq 'X1') -and
+        (-not $r.NativeParams.ContainsKey('UserPrincipalName')) -and
+        (-not $r.OtherAttributes.ContainsKey('userPrincipalName')) -and (-not $r.OtherAttributes.ContainsKey('mailNickname'))
+    }
+}
 
 Write-Host "`n== Field factory ==" -ForegroundColor Cyan
 Add-Type -AssemblyName System.Windows.Forms
