@@ -29,9 +29,11 @@ $script:HybridState = @{
 }
 
 function Reset-HybridState {
-    <# Clear cached per-tenant hybrid facts (+ the AD-write capability). Call on disconnect / switch. #>
+    <# Clear cached per-tenant hybrid facts (+ the AD-write capability + the cached org object). Call on
+       disconnect / switch. #>
     $script:HybridState.TenantChecked = $false
     $script:HybridState.TenantHybrid  = $false
+    if (Get-Command Clear-OrganizationCache -ErrorAction SilentlyContinue) { Clear-OrganizationCache }
     if (Get-Command Reset-AdState -ErrorAction SilentlyContinue) { Reset-AdState }
 }
 
@@ -96,11 +98,13 @@ function Get-FieldHybridState {
 # --- Live detection (requires a Graph connection; not exercised offline) -------------------
 
 function Get-TenantHybridState {
-    <# $true if the tenant has directory sync configured. Cached for the connection. #>
+    <# $true if the tenant has directory sync configured. Cached for the connection. Reads the shared
+       cached organization object so the connect path makes ONE Get-MgOrganization call (shared with the
+       verified-domain dropdown), not a second dedicated one. #>
     if ($script:HybridState.TenantChecked) { return $script:HybridState.TenantHybrid }
     $hybrid = $false
     try {
-        $org = Get-MgOrganization -Property 'onPremisesSyncEnabled' -ErrorAction Stop | Select-Object -First 1
+        $org = Get-OrganizationCached
         $hybrid = ((Get-GraphVal $org 'onPremisesSyncEnabled') -eq $true)
     } catch {
         $hybrid = $false   # best-effort; treat as non-hybrid if the read fails
@@ -108,6 +112,15 @@ function Get-TenantHybridState {
     $script:HybridState.TenantChecked = $true
     $script:HybridState.TenantHybrid  = $hybrid
     return $hybrid
+}
+
+function Get-CachedTenantHybridState {
+    <# The cached hybrid answer WITHOUT triggering any Graph call -- for hot UI paths (the connection
+       label, which refreshes on every connect/switch/disconnect and used to fire a Get-MgOrganization
+       each time just to decide the Force-sync button). Returns $false until Get-TenantHybridState has
+       run once for the connection (which the connect flow does, up front). #>
+    if ($script:HybridState.TenantChecked) { return $script:HybridState.TenantHybrid }
+    return $false
 }
 
 # --- On-prem capability detection (best-effort; full DC reachability lands in P1) ----------

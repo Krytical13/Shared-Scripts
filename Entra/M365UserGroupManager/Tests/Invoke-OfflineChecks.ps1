@@ -742,6 +742,83 @@ Assert-That "SyncState ReadOnly field shows 'cloud-only' for null and 'synced' f
     }
 }
 
+Write-Host "`n== Responsiveness / caching ==" -ForegroundColor Cyan
+Assert-That 'Reset-SkuCache clears BOTH the name map and the rich detail cache' {
+    & $mod {
+        $script:SkuMap = @{ 'x' = 'y' }; $script:SkuDetailCache = @([pscustomobject]@{ SkuId = 'x' })
+        Reset-SkuCache
+        ($script:SkuMap.Count -eq 0) -and ($null -eq $script:SkuDetailCache)
+    }
+}
+Assert-That 'Get-AvailableSku serves the per-connection cache (no Graph round-trip when populated)' {
+    & $mod {
+        $script:SkuDetailCache = @([pscustomobject]@{ SkuId = 's1'; PartNumber = 'ENTERPRISEPACK'; Consumed = 1; Enabled = 5; Available = 4 })
+        $r = Get-AvailableSku
+        Reset-SkuCache
+        (@($r).Count -eq 1) -and ($r[0].PartNumber -eq 'ENTERPRISEPACK')
+    }
+}
+Assert-That 'Get-CachedTenantHybridState makes no Graph call: $false until checked, cached value after' {
+    & $mod {
+        Reset-HybridState
+        $a = Get-CachedTenantHybridState                  # unchecked -> $false, never touches Graph
+        $script:HybridState.TenantChecked = $true; $script:HybridState.TenantHybrid = $true
+        $b = Get-CachedTenantHybridState                  # checked -> cached value
+        Reset-HybridState
+        (-not $a) -and $b
+    }
+}
+Assert-That 'Get-OrganizationCached returns the cached org (one read per connection)' {
+    & $mod {
+        $script:OrgCache = [pscustomobject]@{ DisplayName = 'Contoso'; onPremisesSyncEnabled = $true }
+        $o = Get-OrganizationCached
+        Clear-OrganizationCache
+        ($o.DisplayName -eq 'Contoso') -and ($null -eq $script:OrgCache)
+    }
+}
+Assert-That 'WinRM calls are bounded: New-AdSyncSessionOption sets an 8s OpenTimeout (no indefinite hang)' {
+    $opt = & $mod { New-AdSyncSessionOption }
+    [int]$opt.OpenTimeout.TotalMilliseconds -eq 8000   # OpenTimeout is surfaced as a TimeSpan
+}
+Assert-That 'working dialog builds a Form with a title, status line and indeterminate (marquee) bar' {
+    & $mod {
+        $d = New-ProgressDialogForm
+        $ok = ($d.Form -is [System.Windows.Forms.Form]) -and ($d.Title -is [System.Windows.Forms.Label]) -and
+              ($d.Status -is [System.Windows.Forms.Label]) -and ($d.Bar.Style -eq 'Marquee')
+        $d.Form.Dispose()
+        $ok
+    }
+}
+Assert-That 'connect $batch requests fetch org + subscribed SKUs in one GET batch' {
+    & $mod {
+        $reqs = Get-ConnectBatchRequests
+        (@($reqs).Count -eq 2) -and
+        (($reqs | Where-Object { $_.id -eq 'org' }).url -eq '/organization') -and
+        (($reqs | Where-Object { $_.id -eq 'skus' }).url -eq '/subscribedSkus') -and
+        (@($reqs | Where-Object { $_.method -eq 'GET' }).Count -eq 2)
+    }
+}
+Assert-That 'ConvertTo-SkuDetailList parses raw $batch SKU hashtables into the picker shape (map + counts)' {
+    & $mod {
+        $raw = @(
+            @{ skuId = 'a'; skuPartNumber = 'ENTERPRISEPACK'; consumedUnits = 3; prepaidUnits = @{ enabled = 10 } },
+            @{ skuId = 'b'; skuPartNumber = 'FLOW_FREE';      consumedUnits = 0; prepaidUnits = @{ enabled = 5 } }
+        )
+        $r = ConvertTo-SkuDetailList -SkuValues $raw
+        ($r.Map['a'] -eq 'ENTERPRISEPACK') -and (@($r.Details).Count -eq 2) -and
+        (($r.Details | Where-Object { $_.SkuId -eq 'a' }).Available -eq 7)
+    }
+}
+Assert-That 'device-code fallback fires on a WAM/window failure but NOT on a user cancel or unrelated error' {
+    & $mod {
+        $mk = { param($m) [pscustomobject]@{ Exception = [pscustomobject]@{ Message = $m } } }
+        $wam    = Test-InteractiveAuthFallback (& $mk 'MsalClientException: window handle must be configured for WAM')
+        $cancel = Test-InteractiveAuthFallback (& $mk 'User canceled authentication')
+        $other  = Test-InteractiveAuthFallback (& $mk 'The remote name could not be resolved')
+        $wam -and (-not $cancel) -and (-not $other)
+    }
+}
+
 Write-Host "`n== Headless form build ==" -ForegroundColor Cyan
 $env:M365UGM_NOLAUNCH = '1'
 $form = $null
@@ -751,6 +828,15 @@ Assert-That 'main form builds headless' {
     $form.CreateControl()
     $form.PerformLayout()
     $form -is [System.Windows.Forms.Form]
+}
+Assert-That 'native dark mode applied when available (.NET 9+/PS7); skipped cleanly on 5.1' {
+    # Show-M365UserGroupManager already invoked SetColorMode by reflection. If the API exists
+    # (PS7/.NET 9+), the application color mode must be Dark; on 5.1 the API is absent and the call is
+    # correctly skipped (and the headless build above already proved no error was thrown).
+    $mi = [System.Windows.Forms.Application].GetMethod('SetColorMode')
+    if (-not $mi) { return $true }                       # 5.1 / .NET FW: API absent -> skipped, as designed
+    $cm = [System.Windows.Forms.Application].GetProperty('ColorMode')
+    (-not $cm) -or ("$($cm.GetValue($null))" -eq 'Dark')
 }
 Assert-That 'sidebar nav hosts Users, Groups and Exchange pages' {
     & $mod {
@@ -809,6 +895,19 @@ Assert-That 'Sync-ConnectionUi reflects a disconnected attempt (clears selection
         $script:State = @{ SelectedUser = @{ id = 'x' }; SelectedGroup = $null }
         Sync-ConnectionUi   # offline => not connected => must clear selection + show "Not connected"
         ($null -eq $script:State.SelectedUser) -and ($script:UI.ConnLabel.Text -match 'Not connected')
+    }
+}
+Assert-That 'Show-ProgressDialog is a no-op under M365UGM_NOLAUNCH (headless safe)' {
+    & $mod {
+        $script:ProgressDlg = $null
+        Show-ProgressDialog -Title 'x'          # NOLAUNCH set here -> must not build/show a window
+        $null -eq $script:ProgressDlg
+    }
+}
+Assert-That 'Invoke-WithProgress runs the work, returns its value, and releases the busy lock' {
+    & $mod {
+        $v = Invoke-WithProgress -Title 't' -Work { 42 }
+        ($v -eq 42) -and (-not $script:UI.Busy)
     }
 }
 if ($form) { $form.Dispose() }

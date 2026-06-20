@@ -179,6 +179,57 @@ function Initialize-GraphModule {
     return $plan.Target
 }
 
+# Tenant organization object, fetched once per connection. Both hybrid detection and the verified-domain
+# dropdown read it, so caching turns two Get-MgOrganization round-trips on every connect into one.
+$script:OrgCache = $null
+
+function Get-OrganizationCached {
+    <# The tenant organization object (Get-MgOrganization), fetched once and cached for the connection.
+       Cleared on connect / switch / disconnect via Clear-OrganizationCache (Reset-HybridState). Returns
+       $null if the read fails (callers already treat that as "unknown / best-effort"). #>
+    if ($null -ne $script:OrgCache) { return $script:OrgCache }
+    try { $script:OrgCache = Get-MgOrganization -ErrorAction Stop | Select-Object -First 1 }
+    catch { $script:OrgCache = $null }
+    return $script:OrgCache
+}
+
+function Clear-OrganizationCache { $script:OrgCache = $null }
+
+function Get-ConnectBatchRequests {
+    <# PURE: the Graph $batch request set for the connect bootstrap -- tenant organization + subscribed
+       SKUs in ONE round trip. Kept pure (no I/O) so the offline harness can assert the shape. #>
+    @(
+        @{ id = 'org';  method = 'GET'; url = '/organization' }
+        @{ id = 'skus'; method = 'GET'; url = '/subscribedSkus' }
+    )
+}
+
+function Initialize-ConnectionData {
+    <#
+        Fetch the tenant organization + subscribed SKUs in a SINGLE Graph POST /$batch (instead of two
+        serial GETs) and seed the per-connection caches: $script:OrgCache (read by hybrid detection AND
+        the verified-domain dropdown) and the license caches (Set-SkuCacheFromValues). Best-effort: if
+        /$batch is unavailable or a sub-request returns non-200 (e.g. a missing scope), it just leaves
+        the relevant cache empty so the existing per-call fallbacks (Get-OrganizationCached /
+        Initialize-SkuMap) fill it -- connect never blocks on the batch. Correlates responses by id
+        (the service may return them out of order); each sub-response carries its own status.
+    #>
+    try {
+        $body = @{ requests = Get-ConnectBatchRequests }
+        $resp = Invoke-MgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/$batch' `
+            -Body $body -OutputType Hashtable -ErrorAction Stop
+        foreach ($r in @($resp.responses)) {
+            if ([int]$r.status -ne 200 -or -not $r.body) { continue }
+            switch ([string]$r.id) {
+                'org'  { $script:OrgCache = @($r.body.value)[0] }
+                'skus' { Set-SkuCacheFromValues -SkuValues $r.body.value }
+            }
+        }
+    } catch {
+        # Swallow: the per-call fallbacks (Get-OrganizationCached / Initialize-SkuMap) load each piece.
+    }
+}
+
 function Get-GraphContextSafe {
     <# Get-MgContext, or $null if not connected / SDK not loaded. IMPORTANT: only query when
        Microsoft.Graph.Authentication is ALREADY imported. Calling Get-MgContext cold would auto-load
@@ -196,6 +247,16 @@ function Test-GraphConnected {
 
 function Disconnect-GraphSafe {
     try { Disconnect-MgGraph -ErrorAction Stop | Out-Null } catch { }
+}
+
+function Test-InteractiveAuthFallback {
+    <# PURE: should a failed interactive sign-in be retried with device code? Yes ONLY for "couldn't show
+       the interactive / broker (WAM) window" style failures (jump box, elevated, no desktop broker) --
+       NOT for a user cancel (respect it) or an unrelated error (let it surface). #>
+    param($ErrorRecord)
+    $msg = "$($ErrorRecord.Exception.Message)"
+    if ($msg -match 'cancel') { return $false }
+    return ($msg -match 'WAM|window handle|broker|parent window|interactive.*(not|isn).*support|no.*(browser|desktop)|display|MsalClient')
 }
 
 function Connect-Tenant {
@@ -233,11 +294,28 @@ function Connect-Tenant {
     if ($TenantId)   { $connectParams.TenantId = $TenantId }
     if ($DeviceCode) { $connectParams.UseDeviceCode = $true }
 
-    Set-Progress 'Opening sign-in...'
-    Connect-MgGraph @connectParams | Out-Null
+    # The Graph module import (above, inside Initialize-GraphModule) and this interactive sign-in both
+    # run on the UI thread (the SDK session is bound to this runspace) and are the longest blocks in the
+    # app; the working dialog the caller opened narrates them so the window isn't silent meanwhile.
+    Set-Progress 'Waiting for sign-in -- complete it in the browser window...'
+    try {
+        Connect-MgGraph @connectParams | Out-Null
+    } catch {
+        # On a jump box / elevated / no-broker session the interactive (WAM) flow can fail to show a
+        # window. Rather than dead-end, fall back to device code (sign in from any browser) -- but NOT
+        # on a user cancel (respect their choice) and only when we weren't already device-coding.
+        if (-not $DeviceCode -and (Test-InteractiveAuthFallback $_)) {
+            Set-Progress 'Interactive sign-in unavailable -- switching to device code...'
+            $connectParams.UseDeviceCode = $true
+            Connect-MgGraph @connectParams | Out-Null
+        } else {
+            throw
+        }
+    }
 
-    # A fresh tenant means the cached license-SKU map is stale.
-    $script:SkuMap = @{}
+    # A fresh tenant means the cached license-SKU map + org object are stale.
+    Reset-SkuCache
+    Clear-OrganizationCache
     return Get-GraphContextSafe
 }
 
@@ -245,7 +323,8 @@ function Switch-Tenant {
     <# Re-target the Graph context to another tenant WITHOUT disconnecting (keeps the token cache
        so a previously-used tenant connects silently). #>
     param([Parameter(Mandatory)][string]$TenantId, [switch]$DeviceCode)
-    $script:SkuMap = @{}
+    Reset-SkuCache
+    Clear-OrganizationCache
     return (Connect-Tenant -TenantId $TenantId -DeviceCode:$DeviceCode)
 }
 
@@ -277,8 +356,10 @@ function Initialize-VerifiedDomains {
     $list = New-Object System.Collections.Generic.List[object]
     try {
         # NB: fetch the FULL organization object -- selecting just 'verifiedDomains' via -Property has
-        # been seen to return it null on some SDK versions (which left the dropdown blank).
-        $org = Get-MgOrganization -ErrorAction Stop | Select-Object -First 1
+        # been seen to return it null on some SDK versions (which left the dropdown blank). Shared with
+        # hybrid detection via Get-OrganizationCached (one org read per connect, not two).
+        $org = Get-OrganizationCached
+        if (-not $org) { throw 'organization read failed' }
         $vd = $org.VerifiedDomains                                   # typed collection
         if (-not $vd) { $vd = Get-GraphVal $org 'verifiedDomains' }  # shape-agnostic fallback
         foreach ($d in $vd) {

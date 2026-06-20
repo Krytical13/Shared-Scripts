@@ -164,6 +164,13 @@ function New-MainForm {
     # silently adopting the last/persisted session. Plain scriptblock keeps module affinity.
     $form.Add_Shown({ Invoke-StartupConnect })
 
+    # If the window is closed mid-operation, flag it so any message-pump loop (the connect setup dialog,
+    # the post-create sync poll) unwinds cleanly instead of touching controls that are about to be
+    # disposed, and tear down the working dialog when the form is gone.
+    $script:UiClosing = $false
+    $form.Add_FormClosing({ param($s, $e) $script:UiClosing = $true })
+    $form.Add_FormClosed({ param($s, $e) Close-ProgressDialog })
+
     Set-ControlTheme -Root $form   # dark-theme the input controls (text/combo/list) that don't inherit it
     return $form
 }
@@ -693,6 +700,7 @@ function Initialize-OuPicker {
     if (-not $ctx -or -not $ctx.OuCombo) { return }
     $cap = Get-AdWriteCapability
     if (-not ($cap -and $cap.Available)) { return }
+    Set-Progress 'Loading organizational units from Active Directory...'
     $items = New-Object System.Collections.Generic.List[object]
     $def = Get-AdDefaultUserPath -Dc $cap.Dc
     if ($def) { [void]$items.Add([pscustomobject]@{ Display = "Users (default container) -- $def"; Dn = $def }) }
@@ -711,41 +719,69 @@ function Initialize-OuPicker {
     $ctx.OuCombo.SelectedIndex = $idx
 }
 
+function Set-CreateDestinationFields {
+    <# Show/hide the cloud-only fields (license / usage location -- can't be set until the account exists
+       in Entra) for the chosen create destination, and label the create button. DestHidden records the
+       decision so Get-FieldValidationError skips hidden fields and the offline harness can assert it. #>
+    param([bool]$OnPrem)
+    $ctx = $script:UI.User
+    foreach ($field in $ctx.Order) {
+        if ((Resolve-FieldAuthority $field.Attr) -ne 'Cloud') { continue }
+        if ($field.Label) { $field.Label.Visible = -not $OnPrem }
+        if ($field.Cell)  { $field.Cell.Visible = -not $OnPrem }
+        $field.DestHidden = $OnPrem
+    }
+    $ctx.SaveBtn.Text = if ($OnPrem) { '&Create in AD' } else { '&Create user' }
+}
+
 function Set-UserCreateDestination {
     <#
         New-user Member: route the create to Entra cloud (New-MgUser) or on-premises AD (New-AdUserAccount,
-        which Entra Connect then syncs up). On-prem reveals the OU picker and HIDES the cloud-only fields
-        (license / usage location) -- those can't be set until the account exists in Entra. The On-prem
-        option is gated on a reachable writable DC (the same Get-AdWriteCapability gate the edit path uses).
+        which Entra Connect then syncs up). On-prem reveals the OU picker and HIDES the cloud-only fields.
+
+        PERF: the On-prem availability check (RSAT module import + writable-DC discovery) is DEFERRED until
+        the operator actually selects On-prem. It previously ran on every Cloud default and every mode
+        switch, freezing the UI thread on a hybrid box for work most sessions never need. The Cloud path
+        below makes no AD call; the probe runs only on explicit intent, behind the working dialog.
     #>
     param([ValidateSet('Cloud', 'OnPrem')][string]$Destination)
     $ctx = $script:UI.User
     if (-not $ctx -or -not $ctx.DestPanel) { return }
 
-    $cap = if (Test-GraphConnected) { Get-AdWriteCapability } else { $null }
-    $adOk = [bool]($cap -and $cap.Available)
-    $ctx.DestOnPrem.Enabled = $adOk
-    $reason = if ($adOk) { 'Create the user in on-premises AD; it syncs to Entra on the next directory sync.' }
-              elseif ($cap) { $cap.Reason } else { 'Connect first to check on-premises availability.' }
-    $script:UI.Tooltip.SetToolTip($ctx.DestOnPrem, $reason)
-    if ($Destination -eq 'OnPrem' -and -not $adOk) { $ctx.DestCloud.Checked = $true; return }  # CheckedChanged re-enters as Cloud
+    if ($Destination -eq 'Cloud') {
+        $connected = [bool](Test-GraphConnected)
+        $ctx.DestOnPrem.Enabled = $connected     # clickable when connected; the AD check runs on selection
+        $script:UI.Tooltip.SetToolTip($ctx.DestOnPrem,
+            $(if ($connected) { 'Create the user in on-premises AD instead -- availability is checked when you select this.' }
+              else { 'Connect first to create an on-premises user.' }))
+        $ctx.CurrentDest = 'Cloud'
+        if ($ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
+        Set-CreateDestinationFields -OnPrem $false
+        return
+    }
 
-    $onPrem = ($Destination -eq 'OnPrem')
-    $ctx.CurrentDest = $Destination
+    # On-prem selected -> probe AD now (deliberate intent), behind the working dialog so the RSAT import
+    # + DC discovery isn't a silent freeze. Result is cached in $script:AdState, so re-selecting is instant.
+    $cap = Invoke-WithProgress -Title 'On-premises Active Directory' -Work {
+        Set-Progress 'Checking on-premises Active Directory availability...'
+        Get-AdWriteCapability
+    }
+    if (-not ($cap -and $cap.Available)) {
+        $ctx.DestCloud.Checked = $true           # CheckedChanged re-enters as Cloud (the cheap path)
+        [System.Windows.Forms.MessageBox]::Show(
+            ("On-premises Active Directory isn't available from this workstation right now:`n`n" +
+             "$(if ($cap) { $cap.Reason } else { 'Unknown error.' })`n`nThe user will be created in the cloud instead."),
+            'On-premises AD', 'OK', 'Information') | Out-Null
+        return
+    }
+    $ctx.CurrentDest = 'OnPrem'
     if ($ctx.OuPanel) {
-        $ctx.OuPanel.Visible = $onPrem
-        if ($onPrem -and $ctx.OuCombo.Items.Count -eq 0) { Initialize-OuPicker }
+        $ctx.OuPanel.Visible = $true
+        if ($ctx.OuCombo.Items.Count -eq 0) {
+            Invoke-WithProgress -Title 'On-premises Active Directory' -Work { Initialize-OuPicker }
+        }
     }
-    # Hide cloud-only fields under on-prem (they're set in the cloud after the user syncs). DestHidden
-    # records the decision so Get-FieldValidationError skips them and the offline harness can assert it.
-    foreach ($field in $ctx.Order) {
-        if ((Resolve-FieldAuthority $field.Attr) -ne 'Cloud') { continue }
-        $hide = $onPrem
-        if ($field.Label) { $field.Label.Visible = -not $hide }
-        if ($field.Cell)  { $field.Cell.Visible = -not $hide }
-        $field.DestHidden = $hide
-    }
-    $ctx.SaveBtn.Text = if ($onPrem) { '&Create in AD' } else { '&Create user' }
+    Set-CreateDestinationFields -OnPrem $true
 }
 
 function Get-GeneratedGroupAlias {
@@ -875,8 +911,9 @@ function Update-ConnectionLabel {
         $script:UI.ConnLabel.BackColor = $t.OkBack
         $script:UI.ConnectBtn.Text = '&Switch account...'
         $script:UI.DisconnectBtn.Enabled = $true
-        # Force-sync only makes sense for a directory-synced (hybrid) tenant.
-        if ($script:UI.SyncBtn) { try { $script:UI.SyncBtn.Visible = [bool](Get-TenantHybridState) } catch { $script:UI.SyncBtn.Visible = $false } }
+        # Force-sync only makes sense for a directory-synced (hybrid) tenant. Read the CACHED hybrid flag
+        # (the connect flow computes it once, up front) -- this label refresh must not fire a Graph call.
+        if ($script:UI.SyncBtn) { $script:UI.SyncBtn.Visible = [bool](Get-CachedTenantHybridState) }
     } else {
         $script:UI.ConnLabel.Text = "$([char]0x25CB) Not connected"
         $script:UI.ConnLabel.ForeColor = $t.ErrText
@@ -899,7 +936,7 @@ function Sync-ConnectionUi {
         $script:State.SelectedUser = $null
         $script:State.SelectedGroup = $null
         Reset-HybridState
-        $script:SkuMap = @{}
+        Reset-SkuCache
     }
     Update-ConnectionLabel        # also re-runs Set-TabActionState for both tabs (re-shows the connect overlay if disconnected)
     Update-ExchangeActivation
@@ -923,15 +960,38 @@ function Save-CurrentAccount {
 }
 
 function Complete-Connection {
-    <# Shared post-connect refresh after any successful connect / switch. #>
+    <# Shared post-connect refresh after any successful connect / switch. The Graph reads here all run
+       on the UI thread (the SDK session is bound to it); we narrate each step in the working dialog so
+       the post-sign-in setup isn't a silent freeze. #>
     param($Context)
-    Reset-HybridState            # recompute hybrid + AD-write capability for the (new) tenant
-    Save-CurrentAccount
-    Update-ConnectionLabel
-    Update-ExchangeActivation
-    Initialize-SkuMap -Force
-    Initialize-VerifiedDomains          # for the UPN domain dropdown (must precede Build-TabForm)
-    foreach ($tab in 'User', 'Group') { Build-TabForm -Tab $tab }
+    $null = Invoke-WithProgress -Title "Setting up $($Context.Account)" -Work {
+        Reset-HybridState            # recompute hybrid + AD-write capability for the (new) tenant
+        Save-CurrentAccount
+        # ONE Graph $batch fetches the org + subscribed SKUs and seeds the caches the next steps read,
+        # so the whole connect bootstrap is a single round trip (falls back to per-call reads if /$batch
+        # is unavailable).
+        Set-Progress 'Loading tenant info...'
+        Initialize-ConnectionData
+        # Determine hybrid ONCE, up front, so (a) the connection label + Force-sync button read a warm
+        # cache (no Graph call from the label), and (b) the sync button is correct on the first paint.
+        Set-Progress 'Checking directory sync status...'
+        $hybrid = [bool](Get-TenantHybridState)   # reads the cached org seeded above (no extra call)
+        if ($script:UI.SyncBtn) { $script:UI.SyncBtn.Visible = $hybrid }
+        Update-ConnectionLabel
+        Update-ExchangeActivation
+        Set-Progress 'Loading license SKUs...'
+        Initialize-SkuMap                   # cache seeded by the batch -> no-op (per-call fetch only if not)
+        Set-Progress 'Loading verified domains...'
+        Initialize-VerifiedDomains          # reads the cached org (no extra call); precedes Build-TabForm
+        Set-Progress 'Building forms...'
+        foreach ($tab in 'User', 'Group') { Build-TabForm -Tab $tab }
+        # Now connected: let the On-prem create option be selected (the slow AD availability check still
+        # defers until it's actually picked, so connecting stays fast for the cloud-only common case).
+        if ($script:UI.User -and $script:UI.User.DestOnPrem) {
+            $script:UI.User.DestOnPrem.Enabled = $true
+            $script:UI.Tooltip.SetToolTip($script:UI.User.DestOnPrem, 'Create the user in on-premises AD instead -- availability is checked when you select this.')
+        }
+    }
     $missing = Get-MissingScopes
     if ($missing.Count -gt 0) {
         Set-Progress "Connected, but missing scopes: $($missing -join ', '). Some actions may fail."
@@ -958,6 +1018,7 @@ function Connect-NewAccount {
         $ctx = Connect-Tenant
         if ($ctx) { Complete-Connection -Context $ctx }
     } catch {
+        if ($script:UiClosing) { return }   # window is closing mid-connect -> don't touch UI / pop dialogs
         # We disconnected first to force the account chooser, so a cancel/failure leaves us signed out.
         # Refresh the UI to that truth (the label must not keep saying "Connected"), then explain.
         Sync-ConnectionUi
@@ -988,6 +1049,7 @@ function Invoke-StartupConnect {
 function Invoke-Account {
     <# Connect / Switch-account button. No saved accounts + not connected -> sign in directly;
        otherwise show the account picker. #>
+    if ($script:UI.Busy) { return }   # a connect/switch is already running; ignore a double-click
     $accounts = @($script:Config.Accounts)
     if ($accounts.Count -eq 0 -and -not (Test-GraphConnected)) { Connect-NewAccount; return }
 
@@ -1004,6 +1066,7 @@ function Invoke-Account {
         $ctx = Switch-Tenant -TenantId $choice.TenantId      # silent if the token is still cached
         if ($ctx) { Complete-Connection -Context $ctx }
     } catch {
+        if ($script:UiClosing) { return }   # window is closing mid-switch -> don't touch UI / pop dialogs
         Sync-ConnectionUi   # reflect the real post-attempt state (don't leave a stale "Connected" label)
         if ($_.Exception.Message -match 'cancel') {
             Set-Progress 'Switch cancelled.'
@@ -1018,10 +1081,11 @@ function Invoke-Account {
 }
 
 function Invoke-Disconnect {
+    if ($script:UI.Busy) { return }   # don't disconnect underneath an in-flight connect/switch
     Disconnect-GraphSafe
     Disconnect-ExoSafe                 # the EXO session belonged to this Graph tenant
     Reset-HybridState                  # clear cached hybrid + AD-write capability
-    $script:SkuMap = @{}
+    Reset-SkuCache
     $script:State.SelectedUser = $null; $script:State.SelectedGroup = $null
     Update-ConnectionLabel
     Update-ExchangeActivation          # re-gate the Exchange tab
@@ -1733,14 +1797,15 @@ function Invoke-ForceDirectorySync {
         if ($confirm -ne 'Yes') { return @{ Forced = $false; Reason = 'Cancelled.' } }
     }
 
-    Set-Progress "Reaching $fqdn over WinRM..."
-    if (-not (Test-ConnectServerReachable -Server $fqdn)) {
-        [System.Windows.Forms.MessageBox]::Show("Couldn't reach $fqdn over WinRM. Check VPN/connectivity and that PowerShell remoting (WinRM) is enabled on the Connect server.", 'Not reachable', 'OK', 'Warning') | Out-Null
-        return @{ Forced = $false; Server = $fqdn; Reason = 'WinRM unreachable.' }
+    # Query the server's scheduler over WinRM. The bounded session option (New-AdSyncSessionOption) caps
+    # the connect at ~8s, so an unreachable host fails fast with a message instead of hanging the UI --
+    # which also makes the separate Test-WSMan reachability probe redundant, so it's gone.
+    $state = Invoke-WithProgress -Title 'Force directory sync' -Work {
+        Set-Progress "Contacting $fqdn over WinRM..."
+        Get-RemoteAdSyncState -Server $fqdn
     }
-    $state = Get-RemoteAdSyncState -Server $fqdn
     if ($state.Error) {
-        [System.Windows.Forms.MessageBox]::Show("Couldn't query the sync server $fqdn`:`n$($state.Error)`n`n(You need admin rights on it, and it must be a Microsoft Entra Connect server -- not Cloud Sync.)", 'Sync server', 'OK', 'Warning') | Out-Null
+        [System.Windows.Forms.MessageBox]::Show("Couldn't reach or query the sync server $fqdn`:`n$($state.Error)`n`n(Check VPN/connectivity and that WinRM is enabled, that you have admin rights on it, and that it's a Microsoft Entra Connect server -- not Cloud Sync.)", 'Sync server', 'OK', 'Warning') | Out-Null
         return @{ Forced = $false; Server = $fqdn; Reason = $state.Error }
     }
     $allowed = Test-AdSyncForceAllowed -Scheduler $state.Scheduler -Busy $state.Busy
@@ -1748,8 +1813,10 @@ function Invoke-ForceDirectorySync {
         [System.Windows.Forms.MessageBox]::Show($allowed.Reason, 'Sync not forced', 'OK', 'Information') | Out-Null
         return @{ Forced = $false; Server = $fqdn; Reason = $allowed.Reason }
     }
-    Set-Progress "Forcing a delta sync on $fqdn..."
-    $r = Invoke-RemoteAdSyncDelta -Server $fqdn
+    $r = Invoke-WithProgress -Title 'Force directory sync' -Work {
+        Set-Progress "Forcing a delta sync on $fqdn..."
+        Invoke-RemoteAdSyncDelta -Server $fqdn
+    }
     if ($r.Error) {
         [System.Windows.Forms.MessageBox]::Show("Couldn't start the sync on $fqdn`:`n$($r.Error)", 'Sync error', 'OK', 'Error') | Out-Null
         return @{ Forced = $false; Server = $fqdn; Reason = $r.Error }
@@ -1764,10 +1831,10 @@ function Wait-ForSyncedUser {
     param([Parameter(Mandatory)][string]$Upn, [int]$TimeoutSec = 300)
     $q = $Upn.Replace("'", "''")
     $deadline = [datetime]::Now.AddSeconds($TimeoutSec)
-    while ([datetime]::Now -lt $deadline) {
+    while ([datetime]::Now -lt $deadline -and -not $script:UiClosing) {
         Set-Progress "Waiting for $Upn to sync to Entra..."
         try { if (Get-MgUser -Filter "userPrincipalName eq '$q'" -Top 1 -ErrorAction Stop) { return $true } } catch { }
-        for ($i = 0; $i -lt 20; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 250 }  # ~5s, responsive
+        for ($i = 0; $i -lt 20 -and -not $script:UiClosing; $i++) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 250 }  # ~5s, responsive
     }
     return $false
 }

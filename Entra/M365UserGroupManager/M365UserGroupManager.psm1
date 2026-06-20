@@ -18,9 +18,13 @@ $script:ModuleRoot = $PSScriptRoot
 $script:UI         = @{}                     # WinForms control handles, populated by UiMainForm
 $script:Config     = $null                   # app config (tenants + per-tab enabled attrs), loaded on Show
 $script:SkuMap     = @{}                     # SkuId -> SkuPartNumber cache for license names
+$script:SkuDetailCache = $null               # rich SKU list (counts) for the license picker, built once/connect
+$script:OrgCache   = $null                   # tenant organization object, fetched once per connection
 $script:VerifiedDomains = @()                # tenant verified domains for the UPN domain dropdown
 $script:AppReady   = $false                  # gate: $true only after the window is shown, so NO
                                              # Graph call happens at startup (Connect is the gate)
+$script:UiClosing  = $false                  # set on FormClosing so pump loops unwind without touching
+                                             # controls that are about to be disposed
 $script:State      = @{                      # transient runtime state
     SelectedUser  = $null                    # the user object currently loaded in Edit mode (or $null)
     SelectedGroup = $null                    # the group object currently loaded in Edit mode (or $null)

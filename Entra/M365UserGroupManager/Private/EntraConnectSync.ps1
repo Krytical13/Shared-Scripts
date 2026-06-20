@@ -61,9 +61,18 @@ function Resolve-ServerFqdn {
     return $Name
 }
 
+function New-AdSyncSessionOption {
+    <# WinRM session options with a BOUNDED open timeout. Without this, an unreachable-but-resolvable
+       Connect server makes Invoke-Command wait on the default WinRM connect timeout (tens of seconds to
+       minutes) -- on the UI thread, that is the "app hangs with no indication" the operator hit. 8s is
+       long enough for a healthy on-VPN/in-office connect, short enough to fail fast and report. #>
+    New-PSSessionOption -OpenTimeout 8000 -OperationTimeout 60000 -CancelTimeout 2000
+}
+
 function Test-ConnectServerReachable {
-    <# WinRM reachability probe. Proves the transport is up -- NOT that you're authorized or that ADSync
-       is present (those surface on the real Invoke-Command). #>
+    <# WinRM reachability probe (no longer on the hot path -- the bounded Invoke-Command below surfaces
+       unreachability directly; kept for callers/tests). Proves the transport is up, NOT that you're
+       authorized or that ADSync is present. #>
     param([Parameter(Mandatory)][string]$Server)
     try { [void](Test-WSMan -ComputerName $Server -ErrorAction Stop); return $true } catch { return $false }
 }
@@ -90,7 +99,7 @@ function Get-RemoteAdSyncState {
        @{ Scheduler; Busy } on success, or @{ Error } if remoting / the ADSync module / rights fail. #>
     param([Parameter(Mandatory)][string]$Server)
     try {
-        $r = Invoke-Command -ComputerName $Server -ErrorAction Stop -ScriptBlock {
+        $r = Invoke-Command -ComputerName $Server -SessionOption (New-AdSyncSessionOption) -ErrorAction Stop -ScriptBlock {
             Import-Module ADSync -ErrorAction Stop   # absent on a non-Connect / Cloud Sync host -> throws
             [pscustomobject]@{ Scheduler = (Get-ADSyncScheduler); Busy = [bool](Get-ADSyncConnectorRunStatus) }
         }
@@ -104,7 +113,7 @@ function Invoke-RemoteAdSyncDelta {
        meantime, Start-ADSyncSyncCycle reports AlreadyRunning, which is benign. #>
     param([Parameter(Mandatory)][string]$Server)
     try {
-        Invoke-Command -ComputerName $Server -ErrorAction Stop -ScriptBlock {
+        Invoke-Command -ComputerName $Server -SessionOption (New-AdSyncSessionOption) -ErrorAction Stop -ScriptBlock {
             Import-Module ADSync -ErrorAction Stop
             Start-ADSyncSyncCycle -PolicyType Delta | Out-Null
         }

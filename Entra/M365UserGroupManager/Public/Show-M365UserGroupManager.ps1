@@ -27,6 +27,20 @@ function Show-M365UserGroupManager {
     try { [System.Windows.Forms.Application]::EnableVisualStyles() } catch { }
     try { [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false) } catch { }
 
+    # Native WinForms dark mode (.NET 9 experimental / .NET 10 GA) -- themes the window CHROME (title bar,
+    # non-client, common dialogs, scrollbars) that our hand-rolled Set-ControlTheme can't reach. Must be
+    # set before any UI is created. Invoked by REFLECTION (the API + SystemColorMode enum don't exist on
+    # .NET Framework / Windows PowerShell 5.1, so a direct type reference wouldn't even parse there);
+    # GetMethod returns $null on 5.1 -> we skip and keep the themer-only look. The themer STAYS as the 5.1
+    # baseline AND the backstop for grid/combo/list controls .NET dark mode doesn't fully cover yet.
+    try {
+        $setColorMode = [System.Windows.Forms.Application].GetMethod('SetColorMode')
+        if ($setColorMode) {
+            $colorModeEnum = $setColorMode.GetParameters()[0].ParameterType        # System.Windows.Forms.SystemColorMode
+            $setColorMode.Invoke($null, @([System.Enum]::Parse($colorModeEnum, 'Dark'))) | Out-Null
+        }
+    } catch { }
+
     # Resilience: route any unhandled WinForms exception to a clean dialog instead of the raw
     # .NET crash dialog, and keep the window alive. Must be set before any window is created.
     try {

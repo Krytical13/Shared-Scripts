@@ -168,6 +168,11 @@ function Set-DialogButtonStyle {
 
 function Set-Progress {
     param([string]$Text, [int]$Value = -1, [int]$Max = -1)
+    # Narrate the working dialog too (when it's open), so the existing 'doing X...' call sites show the
+    # current step on top of the window instead of only in the easily-missed bottom status bar.
+    if ($script:ProgressDlg -and -not $script:ProgressDlg.Form.IsDisposed -and $script:ProgressDlg.Form.Visible) {
+        $script:ProgressDlg.Status.Text = $Text
+    }
     if ($script:UI -and $script:UI.Status) {
         $script:UI.Status.Text = $Text
         if ($script:UI.Progress) {
