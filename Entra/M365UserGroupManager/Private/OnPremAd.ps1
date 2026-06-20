@@ -379,6 +379,14 @@ function New-AdUserAccount {
     return $created
 }
 
+function Test-AdSamInUse {
+    <# Is $Sam already taken in the domain? $true = in use (block), $false = free, $null = the check
+       couldn't run (AD blip) so the caller should proceed and let New-ADUser be the final arbiter. #>
+    param([Parameter(Mandatory)][string]$Sam, [Parameter(Mandatory)][string]$Dc)
+    try { return [bool](Get-ADUser -Filter "sAMAccountName -eq '$(Protect-AdFilterValue $Sam)'" -Server $Dc -ErrorAction Stop) }
+    catch { return $null }
+}
+
 function Sync-AdGroupMembership {
     <#
         Apply an add/remove membership diff to a synced AD group. $Now / $Original are picked person
