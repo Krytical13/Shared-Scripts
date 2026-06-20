@@ -30,8 +30,10 @@ function Get-UserSelectProperties {
     }
     foreach ($extra in 'id', 'displayName', 'userPrincipalName', 'usageLocation',
                        'onPremisesSyncEnabled', 'onPremisesExtensionAttributes', 'assignedLicenses',
-                       # On-prem correlation keys for hybrid edit routing (P1: cloud -> AD object mapping).
-                       'onPremisesSamAccountName', 'onPremisesDomainName', 'onPremisesDistinguishedName') {
+                       # On-prem correlation keys for hybrid edit routing (cloud -> AD object mapping +
+                       # the SID anchor that verifies we matched the right principal, not a same-named one).
+                       'onPremisesSamAccountName', 'onPremisesDomainName', 'onPremisesDistinguishedName',
+                       'onPremisesSecurityIdentifier') {
         [void]$props.Add($extra)
     }
     return @($props | Select-Object -Unique)

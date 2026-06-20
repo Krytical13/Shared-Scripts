@@ -58,11 +58,11 @@ function New-DefaultConfig {
     # Plain hashtable for easy in-memory mutation; serialised to JSON by Save-AppConfig.
     # Accounts: saved sign-ins for quick switching -> @{ Name; TenantId; Upn }.
     @{
-        Accounts       = @()
-        Users          = @{ Enabled = (Get-DefaultEnabledNames -Tab 'User') }
-        Groups         = @{ Enabled = (Get-DefaultEnabledNames -Tab 'Group') }
-        LastOnPremOuDn = ''   # last OU chosen for an on-prem AD user create (preselected next time)
-        ConnectServer  = ''   # Entra Connect server override/fallback when cloud autofill can't name it
+        Accounts = @()
+        Users    = @{ Enabled = (Get-DefaultEnabledNames -Tab 'User') }
+        Groups   = @{ Enabled = (Get-DefaultEnabledNames -Tab 'Group') }
+        # NB: on-prem prefs (expected AD domain / Connect server / last OU / VPN hint) are PER-TENANT now,
+        # stored on each Accounts[] entry -- so the two hybrid tenants never clobber each other's values.
     }
 }
 
@@ -85,7 +85,14 @@ function Get-AppConfig {
     if ($accSrc) {
         $cfg.Accounts = @(
             $accSrc | ForEach-Object {
-                @{ Name = [string]$_.Name; TenantId = [string]$_.TenantId; Upn = [string]$_.Upn }
+                @{
+                    Name = [string]$_.Name; TenantId = [string]$_.TenantId; Upn = [string]$_.Upn
+                    # Per-tenant on-prem profile -- preserved across loads; absent in older configs -> ''.
+                    ExpectedOnPremDomain = [string]$_.ExpectedOnPremDomain
+                    ConnectServer        = [string]$_.ConnectServer
+                    LastOnPremOuDn       = [string]$_.LastOnPremOuDn
+                    NeedsVpnHint         = [string]$_.NeedsVpnHint
+                }
             } | Where-Object { $_.TenantId }
         )
     }
@@ -109,6 +116,52 @@ function Save-AppConfig {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
     ($Config | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $path -Encoding UTF8
+}
+
+# --- Per-tenant on-prem profile (keyed by the connected tenant id) -------------------------
+
+function Get-ConnectedTenantId {
+    <# Tenant id of the current Graph session, or '' when not connected. #>
+    $ctx = Get-GraphContextSafe
+    if ($ctx -and $ctx.TenantId) { return [string]$ctx.TenantId }
+    return ''
+}
+
+function Get-TenantProfile {
+    <# The saved Accounts[] entry (hashtable) for a tenant id -- where its on-prem profile lives
+       (ExpectedOnPremDomain / ConnectServer / LastOnPremOuDn / NeedsVpnHint). $null if none saved. #>
+    param([string]$TenantId)
+    if (-not $TenantId) { return $null }
+    return @($script:Config.Accounts | Where-Object { $_.TenantId -eq $TenantId }) | Select-Object -First 1
+}
+
+function Get-TenantProfileValue {
+    <# One per-tenant on-prem field (or '' if unset). Defaults to the CONNECTED tenant. #>
+    param([Parameter(Mandatory)][string]$Field, [string]$TenantId = (Get-ConnectedTenantId))
+    $p = Get-TenantProfile -TenantId $TenantId
+    if ($p -and $p.ContainsKey($Field) -and $p[$Field]) { return [string]$p[$Field] }
+    return ''
+}
+
+function Set-TenantProfileValue {
+    <# Set a per-tenant on-prem field on the connected (or given) tenant's account entry, creating the
+       entry if it doesn't exist yet, and persist. This is what keeps the two hybrid tenants' expected
+       domain / DC / OU / Connect-server values from overwriting each other. #>
+    param([Parameter(Mandatory)][string]$Field, $Value, [string]$TenantId = (Get-ConnectedTenantId))
+    if (-not $TenantId) { return }
+    $p = Get-TenantProfile -TenantId $TenantId
+    if (-not $p) {
+        $p = @{ Name = $TenantId; TenantId = $TenantId; Upn = '' }
+        $script:Config.Accounts = @(@($script:Config.Accounts) + $p)
+    }
+    $p[$Field] = $Value
+    try { Save-AppConfig -Config $script:Config } catch { }
+}
+
+function Get-ConnectedTenantOnPremDomain {
+    <# The connected tenant's expected on-prem AD domain (learned from a synced object's
+       onPremisesDomainName), or '' if not learned yet. Used to scope DC discovery for CREATE / connect. #>
+    return (Get-TenantProfileValue -Field 'ExpectedOnPremDomain')
 }
 
 function Get-EnabledAttributeObjects {

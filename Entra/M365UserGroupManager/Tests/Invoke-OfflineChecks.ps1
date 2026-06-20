@@ -146,9 +146,21 @@ Assert-That 'attribute Names are unique within each tab' {
 
 Write-Host "`n== Config ==" -ForegroundColor Cyan
 $cfg = & $mod { New-DefaultConfig }
-Assert-That 'default config has accounts list + enabled sets + LastOnPremOuDn + ConnectServer' {
+Assert-That 'default config has accounts list + enabled sets (on-prem prefs are now per-tenant, not global)' {
     ($null -ne $cfg.Accounts) -and ($cfg.Users.Enabled.Count -gt 0) -and ($cfg.Groups.Enabled.Count -gt 0) -and
-    ($cfg.ContainsKey('LastOnPremOuDn')) -and ($cfg.ContainsKey('ConnectServer'))
+    (-not $cfg.ContainsKey('LastOnPremOuDn')) -and (-not $cfg.ContainsKey('ConnectServer'))   # retired globals
+}
+Assert-That 'per-tenant on-prem profile reads by tenant id (two hybrids never bleed into each other)' {
+    & $mod {
+        # In-memory only (no Set -> no disk write); proves reads are keyed by tenant id.
+        $script:Config = @{ Accounts = @(
+                @{ TenantId = 'A'; ExpectedOnPremDomain = 'hybrid1.local'; ConnectServer = 'adc-a' },
+                @{ TenantId = 'B'; ExpectedOnPremDomain = 'hybrid2.local' }
+            ) }
+        ((Get-TenantProfileValue -Field 'ExpectedOnPremDomain' -TenantId 'A') -eq 'hybrid1.local') -and
+        ((Get-TenantProfileValue -Field 'ExpectedOnPremDomain' -TenantId 'B') -eq 'hybrid2.local') -and
+        ((Get-TenantProfileValue -Field 'ConnectServer' -TenantId 'B') -eq '')   # A's server never bleeds to B
+    }
 }
 Assert-That 'config JSON round-trips' {
     $json = $cfg | ConvertTo-Json -Depth 6
@@ -739,6 +751,27 @@ Assert-That "SyncState ReadOnly field shows 'cloud-only' for null and 'synced' f
         Set-FieldValue -Field $f -Value $null;  $cloud  = $f.Main.Text
         Set-FieldValue -Field $f -Value $true;  $synced = $f.Main.Text
         ($cloud -match 'cloud-only') -and ($synced -match 'synced from on-prem')
+    }
+}
+
+Write-Host "`n== Hybrid on-prem safety (wrong-forest / wrong-person guards) ==" -ForegroundColor Cyan
+Assert-That 'Test-OnPremDomainMatch: exact + NetBIOS/FQDN match true; different forest false (the core guard)' {
+    & $mod {
+        (Test-OnPremDomainMatch -Expected 'hybrid1.local' -Actual 'hybrid1.local') -and        # same domain
+        (Test-OnPremDomainMatch -Expected 'Hybrid1.LOCAL' -Actual 'hybrid1.local') -and        # case-insensitive
+        (Test-OnPremDomainMatch -Expected 'hybrid1'     -Actual 'hybrid1.local') -and        # NetBIOS vs FQDN
+        (Test-OnPremDomainMatch -Expected '' -Actual 'hybrid1.local') -and                         # cold start -> allow
+        (-not (Test-OnPremDomainMatch -Expected 'hybrid2.local' -Actual 'hybrid1.local')) -and     # WRONG FOREST -> refuse
+        (-not (Test-OnPremDomainMatch -Expected 'corp.a.dom'    -Actual 'corp.b.dom'))                 # same first label, diff forest -> refuse
+    }
+}
+Assert-That 'Test-AdIdentityMatch: SID must match when present; absent SID defers; mismatch refuses (wrong person)' {
+    & $mod {
+        $obj = [pscustomobject]@{ SID = 'S-1-5-21-100-200-300-1105' }
+        (Test-AdIdentityMatch -AdObject $obj -ExpectedSid 'S-1-5-21-100-200-300-1105') -and            # same principal
+        (Test-AdIdentityMatch -AdObject $obj -ExpectedSid '') -and                                     # no SID -> defer to domain guard
+        (-not (Test-AdIdentityMatch -AdObject $obj -ExpectedSid 'S-1-5-21-999-999-999-5001')) -and     # DIFFERENT SID -> refuse
+        (-not (Test-AdIdentityMatch -AdObject $null -ExpectedSid 'S-1-5-21-100-200-300-1105'))         # nothing found -> refuse
     }
 }
 

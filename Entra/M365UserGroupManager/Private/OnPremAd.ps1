@@ -20,10 +20,52 @@
 #>
 
 # Cached AD-write capability for this session (cleared on disconnect / tenant switch via Reset-HybridState).
-$script:AdState = @{ Checked = $false; Available = $false; Reason = ''; Dc = $null }
+# DcDomain = the DNS root the discovered DC actually belongs to; ExpectedDomain = the connected tenant's
+# on-prem domain we verified against. The pair is what prevents a wrong-forest write when the workstation
+# can reach a DIFFERENT tenant's DC than the one we're signed into (the multi-network hazard).
+$script:AdState = @{ Checked = $false; Available = $false; Reason = ''; Dc = $null; DcDomain = $null; ExpectedDomain = $null }
 
 function Reset-AdState {
-    $script:AdState.Checked = $false; $script:AdState.Available = $false; $script:AdState.Reason = ''; $script:AdState.Dc = $null
+    $script:AdState.Checked = $false; $script:AdState.Available = $false; $script:AdState.Reason = ''
+    $script:AdState.Dc = $null; $script:AdState.DcDomain = $null; $script:AdState.ExpectedDomain = $null
+}
+
+# --- Pure pairing / identity guards (exercised offline) ------------------------------------
+
+function Test-OnPremDomainMatch {
+    <#
+        PURE: does an EXPECTED on-prem domain (a cloud object's onPremisesDomainName, or the tenant's
+        stored profile domain) refer to the same AD domain as the ACTUAL domain a reachable DC reports
+        (Get-ADDomain DNSRoot)? Case-insensitive; tolerant of NetBIOS-vs-FQDN ONLY when one side is a
+        single label (so 'hybrid1' matches 'hybrid1.local' but 'corp.a.dom' never matches
+        'corp.b.dom'). Empty expected -> $true (cold start: nothing to verify against; caller confirms).
+    #>
+    param([string]$Expected, [string]$Actual)
+    if ([string]::IsNullOrWhiteSpace($Expected)) { return $true }
+    if ([string]::IsNullOrWhiteSpace($Actual))   { return $false }
+    $e = $Expected.Trim().ToLowerInvariant().TrimEnd('.')
+    $a = $Actual.Trim().ToLowerInvariant().TrimEnd('.')
+    if ($e -eq $a) { return $true }
+    if (($e -notmatch '\.') -or ($a -notmatch '\.')) { return (($e -split '\.')[0] -eq ($a -split '\.')[0]) }
+    return $false
+}
+
+function Test-AdIdentityMatch {
+    <#
+        PURE: confirm a located AD object IS the cloud object's on-prem identity by comparing its
+        objectSid to the cloud object's onPremisesSecurityIdentifier. When the cloud object carries a SID
+        (it should, for a synced object), the match is REQUIRED -- a mismatch means we found a different
+        principal (e.g. a same-named account in the wrong forest), so refuse. When the cloud object has NO
+        SID, we can't positively verify here and defer to the domain-pairing guard (which already scoped
+        the DC to the right forest), so allow.
+    #>
+    param($AdObject, [string]$ExpectedSid)
+    if (-not $AdObject) { return $false }
+    if ([string]::IsNullOrWhiteSpace($ExpectedSid)) { return $true }   # no SID to verify -> rely on domain guard
+    $actual = ''
+    try { $actual = [string]$AdObject.SID } catch { }
+    if (-not $actual) { try { $actual = [string]$AdObject.objectSid } catch { } }
+    return ($actual -eq $ExpectedSid)
 }
 
 # --- Capability / connection ---------------------------------------------------------------
@@ -51,34 +93,78 @@ function Install-AdModule {
 }
 
 function Resolve-WritableDc {
-    <# FQDN of a reachable WRITABLE domain controller, or $null. RSAT first, then a .NET fallback. #>
+    <#
+        FQDN of a reachable WRITABLE domain controller, or $null. When -DomainName is given, discovery is
+        SCOPED to that domain -- so it returns a DC for the connected tenant's forest, or $null when that
+        forest isn't reachable from here (e.g. the VPN to the other office is down). This scoping is the
+        core multi-network guard: it can't accidentally hand back the workstation's own (wrong) domain.
+        Only the UNSCOPED call uses the .NET GetComputerDomain fallback (it can only see the joined domain).
+    #>
+    param([string]$DomainName)
     try {
-        $dc = Get-ADDomainController -Discover -Writable -ErrorAction Stop
+        $p = @{ Discover = $true; Writable = $true; ErrorAction = 'Stop' }
+        if ($DomainName) { $p.DomainName = $DomainName }
+        $dc = Get-ADDomainController @p
         if ($dc -and $dc.HostName) { return [string]($dc.HostName | Select-Object -First 1) }
     } catch { }
-    try {
-        $dom = [System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
-        if ($dom.PdcRoleOwner -and $dom.PdcRoleOwner.Name) { return [string]$dom.PdcRoleOwner.Name }
-    } catch { }
+    if (-not $DomainName) {
+        try {
+            $dom = [System.DirectoryServices.ActiveDirectory.Domain]::GetComputerDomain()
+            if ($dom.PdcRoleOwner -and $dom.PdcRoleOwner.Name) { return [string]$dom.PdcRoleOwner.Name }
+        } catch { }
+    }
     return $null
+}
+
+function Get-AdServerDomain {
+    <# The DNS root domain a given DC belongs to (Get-ADDomain DNSRoot), or '' if it can't be read.
+       Used to verify a discovered DC really belongs to the tenant's expected on-prem domain. #>
+    param([Parameter(Mandatory)][string]$Dc)
+    try { return [string]((Get-ADDomain -Server $Dc -ErrorAction Stop).DNSRoot) } catch { return '' }
 }
 
 function Get-AdWriteCapability {
     <#
-        Can the tool write to on-prem AD right now? Returns the cached $script:AdState
-        @{ Available; Reason; Dc }. Requires: hybrid tenant + RSAT module + a writable DC.
+        Can the tool write to on-prem AD for THIS tenant right now? Returns the cached $script:AdState
+        @{ Available; Reason; Dc; DcDomain; ExpectedDomain }. Requires: hybrid tenant + RSAT module + a
+        writable DC that BELONGS TO the tenant's expected on-prem domain.
+
+        -ExpectedDomain is the connected tenant's on-prem domain (a synced object's onPremisesDomainName,
+        or the tenant profile). It is the safety pivot: discovery is scoped to it, so on the wrong network
+        we get "not reachable" instead of silently targeting the workstation's own forest; and the
+        discovered DC's real domain is verified against it. Recomputes when the expected domain changes
+        (different tenant/object) so a cached capability for forest A is never reused for forest B.
     #>
-    param([switch]$Force)
-    if ($script:AdState.Checked -and -not $Force) { return $script:AdState }
+    param([string]$ExpectedDomain, [switch]$Force)
+    $expected = [string]$ExpectedDomain
+    $sameDomain = ([string]$script:AdState.ExpectedDomain -eq $expected)
+    if ($script:AdState.Checked -and -not $Force -and $sameDomain) { return $script:AdState }
+
     $script:AdState.Checked = $true
-    $script:AdState.Available = $false; $script:AdState.Reason = ''; $script:AdState.Dc = $null
+    $script:AdState.Available = $false; $script:AdState.Reason = ''; $script:AdState.Dc = $null; $script:AdState.DcDomain = $null
+    $script:AdState.ExpectedDomain = $expected
 
     if (-not (Get-TenantHybridState)) { $script:AdState.Reason = 'Tenant is not directory-synced.'; return $script:AdState }
     if (-not (Import-AdModule))       { $script:AdState.Reason = 'The ActiveDirectory (RSAT) module is not installed on this workstation.'; return $script:AdState }
-    $dc = Resolve-WritableDc
-    if (-not $dc)                     { $script:AdState.Reason = 'No writable domain controller is reachable from this workstation.'; return $script:AdState }
 
+    $dc = Resolve-WritableDc -DomainName $expected
+    if (-not $dc) {
+        $script:AdState.Reason = if ($expected) {
+            "No writable domain controller for '$expected' is reachable from here. Connect to that network (VPN / RDP) first."
+        } else { 'No writable domain controller is reachable from this workstation.' }
+        return $script:AdState
+    }
+    $dcDomain = Get-AdServerDomain -Dc $dc
     $script:AdState.Dc = $dc
+    $script:AdState.DcDomain = $dcDomain
+
+    # Forest-pairing guard: the reachable DC MUST be in the tenant's expected on-prem domain. This refuses
+    # the wrong-forest case (signed into tenant B, but only tenant A's DC reachable -- e.g. on the local
+    # LAN with the other VPN down). With scoped discovery this should already hold; verify belt-and-braces.
+    if (-not (Test-OnPremDomainMatch -Expected $expected -Actual $dcDomain)) {
+        $script:AdState.Reason = "The reachable domain controller is in '$dcDomain', but this tenant syncs from '$expected'. Connect to '$expected' (VPN / RDP) before editing its on-premises objects."
+        return $script:AdState
+    }
     $script:AdState.Available = $true
     return $script:AdState
 }
@@ -96,28 +182,32 @@ function Protect-AdFilterValue {
 }
 
 function Get-AdUserForCloudObject {
-    <# Find the on-prem AD user for a synced cloud user: sAMAccountName first, then DN. $null if not found. #>
+    <# Find the on-prem AD user for a synced cloud user (sAMAccountName first, then DN) and VERIFY it is the
+       same principal -- objectSid == onPremisesSecurityIdentifier -- before returning. That rejects a
+       same-named account in the wrong forest instead of editing it. $null if not found / not confirmed. #>
     param($Object, [string]$Dc)
+    $sid = [string](Get-GraphVal $Object 'onPremisesSecurityIdentifier')
     $sam = Get-GraphVal $Object 'onPremisesSamAccountName'
     if ($sam) {
         $u = Get-ADUser -Filter "sAMAccountName -eq '$(Protect-AdFilterValue $sam)'" -Server $Dc -ErrorAction SilentlyContinue
-        if ($u) { return $u }
+        if ($u -and (Test-AdIdentityMatch -AdObject $u -ExpectedSid $sid)) { return $u }
     }
     $dn = Get-GraphVal $Object 'onPremisesDistinguishedName'
-    if ($dn) { try { return Get-ADUser -Identity $dn -Server $Dc -ErrorAction Stop } catch { } }
+    if ($dn) { try { $u = Get-ADUser -Identity $dn -Server $Dc -ErrorAction Stop; if (Test-AdIdentityMatch -AdObject $u -ExpectedSid $sid) { return $u } } catch { } }
     return $null
 }
 
 function Get-AdGroupForCloudObject {
-    <# Find the on-prem AD group for a synced cloud group. $null if not found. #>
+    <# Find the on-prem AD group for a synced cloud group and VERIFY objectSid == onPremisesSecurityIdentifier
+       before returning. $null if not found / not confirmed. #>
     param($Object, [string]$Dc)
+    $sid = [string](Get-GraphVal $Object 'onPremisesSecurityIdentifier')
     $sam = Get-GraphVal $Object 'onPremisesSamAccountName'
     if ($sam) {
         $g = Get-ADGroup -Filter "sAMAccountName -eq '$(Protect-AdFilterValue $sam)'" -Server $Dc -ErrorAction SilentlyContinue
-        if ($g) { return $g }
+        if ($g -and (Test-AdIdentityMatch -AdObject $g -ExpectedSid $sid)) { return $g }
     }
-    $sid = Get-GraphVal $Object 'onPremisesSecurityIdentifier'
-    if ($sid) { try { return Get-ADGroup -Identity $sid -Server $Dc -ErrorAction Stop } catch { } }
+    if ($sid) { try { $g = Get-ADGroup -Identity $sid -Server $Dc -ErrorAction Stop; if (Test-AdIdentityMatch -AdObject $g -ExpectedSid $sid) { return $g } } catch { } }
     return $null
 }
 

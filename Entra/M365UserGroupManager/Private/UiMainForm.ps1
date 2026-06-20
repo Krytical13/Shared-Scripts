@@ -698,7 +698,7 @@ function Initialize-OuPicker {
        (DC dropped / no OUs), disable on-prem and fall back to Cloud rather than offering an empty list. #>
     $ctx = $script:UI.User
     if (-not $ctx -or -not $ctx.OuCombo) { return }
-    $cap = Get-AdWriteCapability
+    $cap = Get-AdWriteCapability -ExpectedDomain (Get-ConnectedTenantOnPremDomain)
     if (-not ($cap -and $cap.Available)) { return }
     Set-Progress 'Loading organizational units from Active Directory...'
     $items = New-Object System.Collections.Generic.List[object]
@@ -713,7 +713,7 @@ function Initialize-OuPicker {
     $ctx.OuCombo.Items.Clear()
     foreach ($i in $items) { [void]$ctx.OuCombo.Items.Add($i) }
     $ctx.OuCombo.DisplayMember = 'Display'; $ctx.OuCombo.ValueMember = 'Dn'
-    $last = [string]$script:Config.LastOnPremOuDn
+    $last = Get-TenantProfileValue -Field 'LastOnPremOuDn'
     $idx = 0
     if ($last) { for ($n = 0; $n -lt $items.Count; $n++) { if ($items[$n].Dn -eq $last) { $idx = $n; break } } }
     $ctx.OuCombo.SelectedIndex = $idx
@@ -764,7 +764,7 @@ function Set-UserCreateDestination {
     # + DC discovery isn't a silent freeze. Result is cached in $script:AdState, so re-selecting is instant.
     $cap = Invoke-WithProgress -Title 'On-premises Active Directory' -Work {
         Set-Progress 'Checking on-premises Active Directory availability...'
-        Get-AdWriteCapability
+        Get-AdWriteCapability -ExpectedDomain (Get-ConnectedTenantOnPremDomain)
     }
     if (-not ($cap -and $cap.Available)) {
         $ctx.DestCloud.Checked = $true           # CheckedChanged re-enters as Cloud (the cheap path)
@@ -1183,6 +1183,15 @@ function Invoke-SelectExisting {
     }
 }
 
+function Set-ConnectedTenantOnPremDomain {
+    <# Learn (once) the connected tenant's on-prem AD domain from a synced object's onPremisesDomainName
+       and persist it to the tenant profile, so CREATE + the on-prem connect can scope DC discovery to the
+       right forest even before an object is loaded. Capture-if-empty: never overwrites an existing value. #>
+    param($Object)
+    $od = [string](Get-GraphVal $Object 'onPremisesDomainName')
+    if ($od -and -not (Get-ConnectedTenantOnPremDomain)) { Set-TenantProfileValue -Field 'ExpectedOnPremDomain' -Value $od }
+}
+
 function Set-TabHybridGating {
     <#
         After an object loads in Edit mode, render its on-prem-mastered fields read-only (with an
@@ -1193,7 +1202,8 @@ function Set-TabHybridGating {
     param([ValidateSet('User', 'Group')][string]$Tab, $Object)
     $ctx = $script:UI[$Tab]
     $synced = Test-ObjectSynced $Object
-    $cap = if ($synced) { Get-AdWriteCapability } else { $null }
+    if ($synced) { Set-ConnectedTenantOnPremDomain $Object }   # learn this tenant's on-prem domain (once)
+    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $Object 'onPremisesDomainName') } else { $null }
     $adAvailable = [bool]($cap -and $cap.Available)
     # On-prem-mastered fields that still can't be routed to AD even when on-prem editing works.
     $adUneditable = @('owners')   # AD groups have no clean multi-owner equivalent (managedBy is single)
@@ -1607,7 +1617,9 @@ function Invoke-SaveUser {
     $user = $script:State.SelectedUser
     $id = Get-GraphVal $user 'id'
     $synced = Test-ObjectSynced $user
-    $cap = if ($synced) { Get-AdWriteCapability } else { $null }
+    # Scope the on-prem capability to THIS user's on-prem domain -- so on the wrong network we get a clear
+    # "connect to <domain>" refusal (cap.Available=$false -> stays a cloud-only save), never a wrong-forest write.
+    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $user 'onPremisesDomainName') } else { $null }
     $routeToAd = [bool]($synced -and $cap -and $cap.Available)
     $changed = $false
     $warnings = @()
@@ -1659,10 +1671,24 @@ function Invoke-CreateUserInAd {
         set here -- they are cloud properties set in Edit after the account syncs.
     #>
     $ctx = $script:UI.User
-    $cap = Get-AdWriteCapability
+    $expectedDomain = Get-ConnectedTenantOnPremDomain
+    $cap = Get-AdWriteCapability -ExpectedDomain $expectedDomain
     if (-not ($cap -and $cap.Available)) {
         [System.Windows.Forms.MessageBox]::Show("On-premises Active Directory isn't available: $(if ($cap) { $cap.Reason } else { 'not connected' }).", 'On-premises AD', 'OK', 'Warning') | Out-Null
         return
+    }
+    # Cold-start guard: if we haven't yet learned this tenant's on-prem domain (no synced object loaded),
+    # discovery was UNSCOPED -- so confirm the discovered domain really is this tenant's AD before creating
+    # a user in it (prevents creating a tenant-#2 user in the local Hybrid1 forest by mistake). On
+    # confirm we remember it, so subsequent on-prem work for this tenant is domain-scoped.
+    if (-not $expectedDomain) {
+        $confirm = [System.Windows.Forms.MessageBox]::Show(
+            ("This will create the user in on-premises Active Directory domain:`n`n    $($cap.DcDomain)`n`n" +
+             "Confirm this is the correct AD for the tenant you're signed into. (If you meant a different " +
+             "tenant's directory, Cancel and connect to that network first.)"),
+            'Confirm on-premises domain', 'OKCancel', 'Warning')
+        if ($confirm -ne 'OK') { return }
+        if ($cap.DcDomain) { Set-TenantProfileValue -Field 'ExpectedOnPremDomain' -Value $cap.DcDomain }
     }
     $dc = $cap.Dc
 
@@ -1725,9 +1751,8 @@ function Invoke-CreateUserInAd {
         }
     }
 
-    # Remember the chosen OU for next time.
-    $script:Config.LastOnPremOuDn = $ouDn
-    try { Save-AppConfig -Config $script:Config } catch { }
+    # Remember the chosen OU for next time -- per-tenant, so it never bleeds to the other hybrid tenant.
+    Set-TenantProfileValue -Field 'LastOnPremOuDn' -Value $ouDn
 
     $msg = "User created in Active Directory:`n$upn`nin $ouDn`n`nIt will appear in Microsoft 365 after the next Microsoft Entra Connect sync (typically within ~30 minutes). Licenses and Usage Location are cloud properties -- set them on this user in Edit mode once it has synced."
     if ($warnings.Count) { $msg += "`n`nNotes:`n  " + ($warnings -join "`n  ") }
@@ -1781,13 +1806,14 @@ function Invoke-ForceDirectorySync {
 
     Set-Progress 'Locating the Entra Connect server...'
     $info = Get-EntraConnectSyncInfo
-    $name = if ($info -and $info.ServerName) { $info.ServerName } elseif ($script:Config.ConnectServer) { [string]$script:Config.ConnectServer } else { $null }
+    $savedServer = Get-TenantProfileValue -Field 'ConnectServer'
+    $name = if ($info -and $info.ServerName) { $info.ServerName } elseif ($savedServer) { $savedServer } else { $null }
     if (-not $name) {
         $name = Show-TextInput -Title 'Entra Connect server' -Prompt "Couldn't auto-detect the Microsoft Entra Connect server from the cloud. Enter its name or FQDN:" -Default ''
         if (-not $name) { return @{ Forced = $false; Reason = 'No server specified.' } }
     }
     $fqdn = Resolve-ServerFqdn -Name $name
-    $script:Config.ConnectServer = $name; try { Save-AppConfig -Config $script:Config } catch { }
+    Set-TenantProfileValue -Field 'ConnectServer' -Value $name   # per-tenant Connect server (no cross-tenant clobber)
 
     if (-not $NoConfirm) {
         $pending = if ($info) { "`n($($info.PendingAdds) add / $($info.PendingUpdates) update pending export.)" } else { '' }
@@ -1870,7 +1896,7 @@ function Invoke-SaveGroup {
     $group = $script:State.SelectedGroup
     $gid = Get-GraphVal $group 'id'
     $synced = Test-ObjectSynced $group
-    $cap = if ($synced) { Get-AdWriteCapability } else { $null }
+    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $group 'onPremisesDomainName') } else { $null }
     $routeToAd = [bool]($synced -and $cap -and $cap.Available)
     $changed = $false
     $warnings = @()
@@ -1979,7 +2005,9 @@ function Invoke-UserPasswordReset {
     $res = Show-PasswordResetDialog -DisplayName (Get-GraphVal $user 'displayName')
     if (-not $res) { return }
     $synced = Test-ObjectSynced $user
-    $cap = if ($synced) { Get-AdWriteCapability } else { $null }
+    # Scope the on-prem capability to THIS user's on-prem domain -- so on the wrong network we get a clear
+    # "connect to <domain>" refusal (cap.Available=$false -> stays a cloud-only save), never a wrong-forest write.
+    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $user 'onPremisesDomainName') } else { $null }
     $routeToAd = [bool]($synced -and $cap -and $cap.Available)
     Set-UiBusy $true
     try {
