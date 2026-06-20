@@ -169,6 +169,19 @@ function Get-AdWriteCapability {
     return $script:AdState
 }
 
+function Get-AdState { $script:AdState }
+
+function Test-OnPremReadyForObject {
+    <# Is on-prem AD currently CONNECTED + verified for THIS object's domain? Reads the cached capability
+       ONLY (never probes -- the operator connects on-prem explicitly via the sidebar). True means: a
+       connect was made AND it succeeded AND the connected DC's domain matches this object's
+       onPremisesDomainName. Used to decide read-only gating and whether a save routes to AD. #>
+    param($Object)
+    $st = $script:AdState
+    if (-not ($st.Checked -and $st.Available)) { return $false }
+    return (Test-OnPremDomainMatch -Expected ([string](Get-GraphVal $Object 'onPremisesDomainName')) -Actual $st.DcDomain)
+}
+
 # --- Cloud -> on-prem object mapping -------------------------------------------------------
 
 function Protect-AdFilterValue {

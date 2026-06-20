@@ -774,6 +774,19 @@ Assert-That 'Test-AdIdentityMatch: SID must match when present; absent SID defer
         (-not (Test-AdIdentityMatch -AdObject $null -ExpectedSid 'S-1-5-21-100-200-300-1105'))         # nothing found -> refuse
     }
 }
+Assert-That 'Test-OnPremReadyForObject (cached, no probe): true only when connected + DC domain matches the object' {
+    & $mod {
+        $obj = @{ onPremisesDomainName = 'hybrid2.local' }
+        $script:AdState.Checked = $true; $script:AdState.Available = $true; $script:AdState.DcDomain = 'hybrid2.local'
+        $okMatch = Test-OnPremReadyForObject $obj
+        $script:AdState.DcDomain = 'hybrid1.local'        # connected, but to the WRONG forest
+        $wrongForest = Test-OnPremReadyForObject $obj
+        $script:AdState.Available = $false                    # connect attempt failed / not connected
+        $notConnected = Test-OnPremReadyForObject $obj
+        Reset-AdState
+        $okMatch -and (-not $wrongForest) -and (-not $notConnected)
+    }
+}
 
 Write-Host "`n== Responsiveness / caching ==" -ForegroundColor Cyan
 Assert-That 'Reset-SkuCache clears BOTH the name map and the rich detail cache' {
@@ -888,6 +901,9 @@ Assert-That 'User New form has the Create-in (cloud/on-prem) toggle + OU picker 
 }
 Assert-That 'sidebar has a Force-AD-sync button, hidden until connected to a hybrid tenant' {
     & $mod { [bool]$script:UI.SyncBtn -and (-not $script:UI.SyncBtn.Visible) }
+}
+Assert-That 'sidebar has an explicit on-prem AD connect row (label + button), hidden until hybrid' {
+    & $mod { [bool]$script:UI.OnPremBtn -and [bool]$script:UI.OnPremLabel -and (-not $script:UI.OnPremBtn.Visible) -and (-not $script:UI.OnPremLabel.Visible) }
 }
 Assert-That 'Exchange tab starts gated (not connected, management panel hidden)' {
     # Note: Control.Visible reports EFFECTIVE visibility (false for any control on a form that was

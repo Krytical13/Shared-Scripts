@@ -64,7 +64,7 @@ function New-MainForm {
     # Connection block, pinned to the sidebar bottom.
     $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
     $connPanel.Dock = 'Fill'; $connPanel.AutoSize = $true; $connPanel.AutoSizeMode = 'GrowAndShrink'
-    $connPanel.ColumnCount = 1; $connPanel.RowCount = 4; $connPanel.BackColor = $t.NavBg
+    $connPanel.ColumnCount = 1; $connPanel.RowCount = 6; $connPanel.BackColor = $t.NavBg
     $connPanel.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 14)
     [void]$connPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $connLabel = New-Object System.Windows.Forms.Label
@@ -74,10 +74,19 @@ function New-MainForm {
     $connectBtn.Text = '&Connect'; $connectBtn.Dock = 'Fill'; $connectBtn.Height = $t.BtnHPrimary; $connectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 2, 3, 6)
     $disconnectBtn = New-Object System.Windows.Forms.Button
     $disconnectBtn.Text = 'Dis&connect'; $disconnectBtn.Dock = 'Fill'; $disconnectBtn.Height = $t.BtnH; $disconnectBtn.Enabled = $false; $disconnectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 0)
-    # Force a directory sync (hybrid tenants only) -- shown by Update-ConnectionLabel when synced.
+    # On-prem AD connection -- a SEPARATE connect from the cloud sign-in (the on-prem network is reached by
+    # VPN / LAN / RDP, independent of which tenant you're signed into). The label is the second line of the
+    # connection banner; both row + button are hidden until the tenant is known hybrid (Update-OnPremUi).
+    $onpremLabel = New-Object System.Windows.Forms.Label
+    $onpremLabel.Text = ''; $onpremLabel.AutoSize = $true; $onpremLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 28), 0)
+    $onpremLabel.Font = $t.FontBase; $onpremLabel.ForeColor = $t.Muted; $onpremLabel.Margin = New-Object System.Windows.Forms.Padding(3, 10, 3, 6); $onpremLabel.Visible = $false
+    $onpremBtn = New-Object System.Windows.Forms.Button
+    $onpremBtn.Text = 'Connect on-&prem AD'; $onpremBtn.Dock = 'Fill'; $onpremBtn.Height = $t.BtnH; $onpremBtn.Visible = $false; $onpremBtn.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 0)
+    # Force a directory sync (hybrid tenants only) -- shown by Update-SyncButtonState when synced.
     $syncBtn = New-Object System.Windows.Forms.Button
     $syncBtn.Text = 'Force AD &sync'; $syncBtn.Dock = 'Fill'; $syncBtn.Height = $t.BtnH; $syncBtn.Visible = $false; $syncBtn.Margin = New-Object System.Windows.Forms.Padding(3, 8, 3, 0)
-    $connPanel.Controls.Add($connLabel, 0, 0); $connPanel.Controls.Add($connectBtn, 0, 1); $connPanel.Controls.Add($disconnectBtn, 0, 2); $connPanel.Controls.Add($syncBtn, 0, 3)
+    $connPanel.Controls.Add($connLabel, 0, 0); $connPanel.Controls.Add($connectBtn, 0, 1); $connPanel.Controls.Add($disconnectBtn, 0, 2)
+    $connPanel.Controls.Add($onpremLabel, 0, 3); $connPanel.Controls.Add($onpremBtn, 0, 4); $connPanel.Controls.Add($syncBtn, 0, 5)
 
     $nav.Controls.Add($brand, 0, 0); $nav.Controls.Add($cap, 0, 1)
     $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4)
@@ -121,6 +130,7 @@ function New-MainForm {
     $script:UI = @{
         Form = $form; Tooltip = $tooltip; ErrorProvider = $errorProvider
         ConnectBtn = $connectBtn; DisconnectBtn = $disconnectBtn; SyncBtn = $syncBtn
+        OnPremBtn = $onpremBtn; OnPremLabel = $onpremLabel
         ConnLabel = $connLabel; Status = $status; Progress = $progress
         NavPanel = $nav; PageHost = $pageHost; HeaderTitle = $hdrTitle; CurrentPage = 'User'
         NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button }
@@ -143,10 +153,12 @@ function New-MainForm {
     }
     Set-PrimaryButtonStyle $connectBtn        # the main call-to-action in the sidebar
     Set-SecondaryButtonStyle $disconnectBtn
+    Set-SecondaryButtonStyle $onpremBtn
     Set-SecondaryButtonStyle $syncBtn
     $script:UI.Tooltip.SetToolTip($syncBtn, 'Force a Microsoft Entra Connect delta sync and let recent on-prem changes appear in Entra now')
     $connectBtn.Add_Click({ Invoke-Account })
     $disconnectBtn.Add_Click({ Invoke-Disconnect })
+    $onpremBtn.Add_Click({ Invoke-ConnectOnPrem })
     $syncBtn.Add_Click({
         Set-UiBusy $true
         try {
@@ -766,6 +778,7 @@ function Set-UserCreateDestination {
         Set-Progress 'Checking on-premises Active Directory availability...'
         Get-AdWriteCapability -ExpectedDomain (Get-ConnectedTenantOnPremDomain)
     }
+    Update-OnPremUi   # reflect the probe result in the sidebar on-prem row
     if (-not ($cap -and $cap.Available)) {
         $ctx.DestCloud.Checked = $true           # CheckedChanged re-enters as Cloud (the cheap path)
         [System.Windows.Forms.MessageBox]::Show(
@@ -911,19 +924,110 @@ function Update-ConnectionLabel {
         $script:UI.ConnLabel.BackColor = $t.OkBack
         $script:UI.ConnectBtn.Text = '&Switch account...'
         $script:UI.DisconnectBtn.Enabled = $true
-        # Force-sync only makes sense for a directory-synced (hybrid) tenant. Read the CACHED hybrid flag
-        # (the connect flow computes it once, up front) -- this label refresh must not fire a Graph call.
-        if ($script:UI.SyncBtn) { $script:UI.SyncBtn.Visible = [bool](Get-CachedTenantHybridState) }
     } else {
         $script:UI.ConnLabel.Text = "$([char]0x25CB) Not connected"
         $script:UI.ConnLabel.ForeColor = $t.ErrText
         $script:UI.ConnLabel.BackColor = $t.ErrBack
         $script:UI.ConnectBtn.Text = '&Connect'
         $script:UI.DisconnectBtn.Enabled = $false
-        if ($script:UI.SyncBtn) { $script:UI.SyncBtn.Visible = $false }
     }
+    Update-OnPremUi          # second banner line: on-prem AD state (hybrid only); reads cached state, no probe
+    Update-SyncButtonState   # force-sync visibility/label keyed to hybrid + the per-tenant Connect server
     Set-TabActionState -Tab 'User'
     Set-TabActionState -Tab 'Group'
+}
+
+function Get-OnPremUiState {
+    <#
+        On-prem AD connection status for the CONNECTED tenant, derived from the CACHED capability (never
+        probes). Drives the sidebar on-prem row + the field gating. States:
+          CloudOnly    - not connected, or the tenant isn't hybrid (no on-prem row)
+          NotConnected - hybrid, but the operator hasn't connected on-prem yet
+          Connected    - connected + verified to the tenant's on-prem domain
+          WrongNetwork - a DC answered, but in a DIFFERENT forest than this tenant (e.g. local LAN, other VPN down)
+          Unreachable  - no DC for the expected domain answered (VPN/RDP not up)
+          NoRsat       - the RSAT ActiveDirectory module isn't installed here
+    #>
+    if (-not (Test-GraphConnected) -or -not (Get-CachedTenantHybridState)) { return @{ State = 'CloudOnly' } }
+    $st = Get-AdState
+    $expected = Get-ConnectedTenantOnPremDomain
+    if (-not $st.Checked) { return @{ State = 'NotConnected'; Expected = $expected } }
+    if ($st.Available)    { return @{ State = 'Connected'; Domain = $st.DcDomain; Dc = $st.Dc; Expected = $expected } }
+    if ($st.Reason -match 'RSAT') { return @{ State = 'NoRsat'; Reason = $st.Reason; Expected = $expected } }
+    if ($st.DcDomain)     { return @{ State = 'WrongNetwork'; Domain = $st.DcDomain; Expected = $expected; Reason = $st.Reason } }
+    return @{ State = 'Unreachable'; Expected = $expected; Reason = $st.Reason }
+}
+
+function Update-OnPremUi {
+    <# Paint the sidebar on-prem row from the current (cached) state -- the second line of the connection
+       banner. No probe; the explicit Connect button is what probes. Hidden for cloud-only tenants. #>
+    if (-not $script:UI -or -not $script:UI.OnPremLabel) { return }
+    $t = Get-Theme
+    $s = Get-OnPremUiState
+    $hybrid = ($s.State -ne 'CloudOnly')
+    $script:UI.OnPremLabel.Visible = $hybrid
+    $script:UI.OnPremBtn.Visible = $hybrid
+    if (-not $hybrid) { return }
+    $dot = [char]0x25CF; $hollow = [char]0x25CB
+    $expectedTxt = if ($s.Expected) { $s.Expected } else { 'this tenant' }
+    switch ($s.State) {
+        'Connected'    { $script:UI.OnPremLabel.Text = "$dot On-prem AD: $($s.Domain)"; $script:UI.OnPremLabel.ForeColor = $t.OkText;   $script:UI.OnPremBtn.Text = 'Recon&nect on-prem'; $tip = "Connected to $($s.Domain) via $($s.Dc). On-prem edits for this tenant's synced objects are enabled." }
+        'NotConnected' { $script:UI.OnPremLabel.Text = "$hollow On-prem AD: not connected"; $script:UI.OnPremLabel.ForeColor = $t.Muted;  $script:UI.OnPremBtn.Text = 'Connect on-&prem AD'; $tip = "Connect to $expectedTxt's on-premises Active Directory to edit synced objects (you may need VPN/RDP to that network)." }
+        'WrongNetwork' { $script:UI.OnPremLabel.Text = "$hollow On-prem AD: wrong network"; $script:UI.OnPremLabel.ForeColor = $t.WarnText; $script:UI.OnPremBtn.Text = 'Retr&y on-prem'; $tip = $s.Reason }
+        'Unreachable'  { $script:UI.OnPremLabel.Text = "$hollow On-prem AD: not reachable"; $script:UI.OnPremLabel.ForeColor = $t.WarnText; $script:UI.OnPremBtn.Text = 'Connect on-&prem AD'; $tip = $s.Reason }
+        'NoRsat'       { $script:UI.OnPremLabel.Text = "$hollow On-prem AD: RSAT not installed"; $script:UI.OnPremLabel.ForeColor = $t.WarnText; $script:UI.OnPremBtn.Text = 'Connect on-&prem AD'; $tip = $s.Reason }
+    }
+    if ($script:UI.Tooltip) { $script:UI.Tooltip.SetToolTip($script:UI.OnPremLabel, $tip); $script:UI.Tooltip.SetToolTip($script:UI.OnPremBtn, $tip) }
+}
+
+function Update-SyncButtonState {
+    <# Force-sync button: visible for a hybrid tenant, labelled with the per-tenant Connect server so the
+       operator can see WHICH server/tenant it targets (the server name comes from the cloud or the saved
+       per-tenant value; WinRM reachability is enforced at click time with a bounded timeout). #>
+    if (-not $script:UI -or -not $script:UI.SyncBtn) { return }
+    $hybrid = [bool](Test-GraphConnected) -and [bool](Get-CachedTenantHybridState)
+    $script:UI.SyncBtn.Visible = $hybrid
+    if (-not $hybrid) { return }
+    $server = Get-TenantProfileValue -Field 'ConnectServer'
+    $script:UI.SyncBtn.Text = if ($server) { "Force AD &sync ($server)" } else { 'Force AD &sync' }
+}
+
+function Invoke-ConnectOnPrem {
+    <# Explicit "Connect on-prem AD" action: probe the connected tenant's on-prem AD (scoped to its
+       expected domain), update the sidebar + re-gate the loaded object, and -- on a cold start where the
+       domain isn't known yet -- confirm the discovered domain before trusting it. #>
+    if ($script:UI.Busy) { return }
+    Set-UiBusy $true
+    try {
+        $expected = Get-ConnectedTenantOnPremDomain
+        $cap = Invoke-WithProgress -Title 'Connect on-premises AD' -Work {
+            Set-Progress 'Connecting to on-premises Active Directory...'
+            Get-AdWriteCapability -ExpectedDomain $expected -Force
+        }
+        if ($cap.Available -and -not $expected) {
+            # Cold start: discovery was unscoped -> confirm the domain is really this tenant's AD.
+            $ok = [System.Windows.Forms.MessageBox]::Show(
+                ("Connected to on-premises Active Directory domain:`n`n    $($cap.DcDomain)`n`nConfirm this is the correct AD for the tenant you're signed into. " +
+                 "(If you meant a different tenant's directory, Cancel and connect to that network first.)"),
+                'Confirm on-premises domain', 'OKCancel', 'Warning')
+            if ($ok -ne 'OK') { Reset-AdState }
+            elseif ($cap.DcDomain) { Set-TenantProfileValue -Field 'ExpectedOnPremDomain' -Value $cap.DcDomain }
+        }
+        Update-OnPremUi
+        $st = Get-AdState
+        # Re-IMPORT the loaded object (not just re-gate) so its fields are rebuilt and the on-prem-mastered
+        # ones flip from read-only to editable now that we're connected (re-gating alone wouldn't un-lock them).
+        if ($script:UI.User.Mode  -eq 'Edit' -and $script:State.SelectedUser)  { Import-UserIntoForm  -User  $script:State.SelectedUser }
+        if ($script:UI.Group.Mode -eq 'Edit' -and $script:State.SelectedGroup) { Import-GroupIntoForm -Group $script:State.SelectedGroup }
+        if ($st.Available) {
+            Set-Progress "On-premises AD connected: $($st.DcDomain)."
+        } else {
+            Set-Progress 'On-premises AD not connected.'
+            if ($st.Reason) { [System.Windows.Forms.MessageBox]::Show($st.Reason, 'On-premises AD', 'OK', 'Information') | Out-Null }  # empty reason = cold-start cancel -> no dialog
+        }
+    } catch {
+        if (-not $script:UiClosing) { [System.Windows.Forms.MessageBox]::Show("Couldn't connect on-premises AD:`n$($_.Exception.Message)", 'On-premises AD', 'OK', 'Error') | Out-Null }
+    } finally { Set-UiBusy $false }
 }
 
 function Sync-ConnectionUi {
@@ -1203,8 +1307,9 @@ function Set-TabHybridGating {
     $ctx = $script:UI[$Tab]
     $synced = Test-ObjectSynced $Object
     if ($synced) { Set-ConnectedTenantOnPremDomain $Object }   # learn this tenant's on-prem domain (once)
-    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $Object 'onPremisesDomainName') } else { $null }
-    $adAvailable = [bool]($cap -and $cap.Available)
+    # Use the CACHED on-prem connection (NO probe on load) -- the operator connects on-prem explicitly via
+    # the sidebar. adAvailable = connected + verified for THIS object's on-prem domain.
+    $adAvailable = [bool]($synced -and (Test-OnPremReadyForObject $Object))
     # On-prem-mastered fields that still can't be routed to AD even when on-prem editing works.
     $adUneditable = @('owners')   # AD groups have no clean multi-owner equivalent (managedBy is single)
     # Scalar fields with no cloud->AD attribute mapping can't be written on-prem either -- keep them
@@ -1225,7 +1330,7 @@ function Set-TabHybridGating {
             }
         } else {
             Set-FieldReadOnlyForSync -Field $field
-            $hint = if ($cap -and $cap.Reason) { "Managed in Active Directory (synced). On-prem editing unavailable: $($cap.Reason)" } else { $state.Hint }
+            $hint = if ($synced -and -not $adAvailable) { 'Synced from AD. Use "Connect on-prem AD" in the sidebar (you may need VPN/RDP to this tenant''s network) to edit this field.' } else { $state.Hint }
             if ($field.Main -and $script:UI.Tooltip) { $script:UI.Tooltip.SetToolTip($field.Main, $hint) }
         }
     }
@@ -1617,10 +1722,10 @@ function Invoke-SaveUser {
     $user = $script:State.SelectedUser
     $id = Get-GraphVal $user 'id'
     $synced = Test-ObjectSynced $user
-    # Scope the on-prem capability to THIS user's on-prem domain -- so on the wrong network we get a clear
-    # "connect to <domain>" refusal (cap.Available=$false -> stays a cloud-only save), never a wrong-forest write.
-    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $user 'onPremisesDomainName') } else { $null }
-    $routeToAd = [bool]($synced -and $cap -and $cap.Available)
+    # Route to AD only when the operator has explicitly CONNECTED on-prem (cached) AND it's verified for
+    # THIS user's on-prem domain -- never probe at save time, never target the wrong forest.
+    $routeToAd = [bool]($synced -and (Test-OnPremReadyForObject $user))
+    $cap = if ($routeToAd) { Get-AdState } else { $null }
     $changed = $false
     $warnings = @()
 
@@ -1657,10 +1762,8 @@ function Invoke-SaveUser {
     if (-not $changed) { Set-Progress 'No changes to save.'; return }
     Set-Progress 'Reloading...'
     Import-UserIntoForm -User (Get-UserById -Id $id)
-    $msg = if ($routeToAd) { 'Saved. On-premises changes appear in the cloud after the next directory sync.' } else { 'Changes saved.' }
-    if ($warnings.Count) { $msg += "`n`nNotes:`n  " + ($warnings -join "`n  ") }
     Set-Progress "Saved changes to $(Get-GraphVal $user 'userPrincipalName')."
-    [System.Windows.Forms.MessageBox]::Show($msg, 'Saved', 'OK', 'Information') | Out-Null
+    Show-SavedWithSyncOffer -RouteToAd $routeToAd -Warnings $warnings
 }
 
 function Invoke-CreateUserInAd {
@@ -1851,6 +1954,34 @@ function Invoke-ForceDirectorySync {
     return @{ Forced = $true; Server = $fqdn }
 }
 
+function Show-SavedWithSyncOffer {
+    <#
+        Confirm a save and -- when it went to on-premises AD -- offer to force a directory sync NOW, so
+        the change appears in the cloud without waiting for the next cycle (closing the loop in one pane
+        instead of a portal trip). Runs inside the save's existing busy/try-catch; Invoke-ForceDirectorySync
+        brings its own progress dialog + result messages, and -NoConfirm skips its own prompt since we asked.
+    #>
+    param([bool]$RouteToAd, [string[]]$Warnings)
+    $notes = if ($Warnings -and $Warnings.Count) { "`n`nNotes:`n  " + ($Warnings -join "`n  ") } else { '' }
+    if (-not $RouteToAd) {
+        [System.Windows.Forms.MessageBox]::Show("Changes saved.$notes", 'Saved', 'OK', 'Information') | Out-Null
+        return
+    }
+    $ans = [System.Windows.Forms.MessageBox]::Show(
+        ("Saved to on-premises Active Directory.$notes`n`nOn-prem changes appear in the cloud after the next " +
+         "Microsoft Entra Connect sync. Force a sync now?"),
+        'Saved to AD', 'YesNo', 'Information')
+    if ($ans -ne 'Yes') { return }
+    try {
+        $r = Invoke-ForceDirectorySync -NoConfirm
+        if ($r.Forced) {
+            [System.Windows.Forms.MessageBox]::Show("A delta sync was started on $($r.Server). The change will appear in Entra shortly (typically a few minutes).", 'Sync started', 'OK', 'Information') | Out-Null
+        }
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show("Couldn't force a sync:`n$($_.Exception.Message)", 'Sync error', 'OK', 'Error') | Out-Null
+    }
+}
+
 function Wait-ForSyncedUser {
     <# Poll Entra (Get-MgUser by UPN) until the just-created on-prem user appears, or timeout. Pumps the
        UI so the window stays responsive. Returns $true if it appeared. #>
@@ -1896,8 +2027,8 @@ function Invoke-SaveGroup {
     $group = $script:State.SelectedGroup
     $gid = Get-GraphVal $group 'id'
     $synced = Test-ObjectSynced $group
-    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $group 'onPremisesDomainName') } else { $null }
-    $routeToAd = [bool]($synced -and $cap -and $cap.Available)
+    $routeToAd = [bool]($synced -and (Test-OnPremReadyForObject $group))
+    $cap = if ($routeToAd) { Get-AdState } else { $null }
     $changed = $false
     $warnings = @()
 
@@ -1918,10 +2049,8 @@ function Invoke-SaveGroup {
     if (-not $changed) { Set-Progress 'No changes to save.'; return }
     Set-Progress 'Reloading...'
     Import-GroupIntoForm -Group (Get-GroupById -Id $gid)
-    $msg = if ($routeToAd) { 'Saved. On-premises changes appear in the cloud after the next directory sync.' } else { 'Changes saved.' }
-    if ($warnings.Count) { $msg += "`n`nNotes:`n  " + ($warnings -join "`n  ") }
     Set-Progress "Saved changes to $(Get-GraphVal $group 'displayName')."
-    [System.Windows.Forms.MessageBox]::Show($msg, 'Saved', 'OK', 'Information') | Out-Null
+    Show-SavedWithSyncOffer -RouteToAd $routeToAd -Warnings $warnings
 }
 
 function Add-PeopleToGroup {
@@ -2005,10 +2134,10 @@ function Invoke-UserPasswordReset {
     $res = Show-PasswordResetDialog -DisplayName (Get-GraphVal $user 'displayName')
     if (-not $res) { return }
     $synced = Test-ObjectSynced $user
-    # Scope the on-prem capability to THIS user's on-prem domain -- so on the wrong network we get a clear
-    # "connect to <domain>" refusal (cap.Available=$false -> stays a cloud-only save), never a wrong-forest write.
-    $cap = if ($synced) { Get-AdWriteCapability -ExpectedDomain (Get-GraphVal $user 'onPremisesDomainName') } else { $null }
-    $routeToAd = [bool]($synced -and $cap -and $cap.Available)
+    # Route to AD only when the operator has explicitly CONNECTED on-prem (cached) AND it's verified for
+    # THIS user's on-prem domain -- never probe at save time, never target the wrong forest.
+    $routeToAd = [bool]($synced -and (Test-OnPremReadyForObject $user))
+    $cap = if ($routeToAd) { Get-AdState } else { $null }
     Set-UiBusy $true
     try {
         if ($routeToAd) {

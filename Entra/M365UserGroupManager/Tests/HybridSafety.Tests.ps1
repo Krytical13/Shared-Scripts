@@ -75,6 +75,56 @@ Describe 'On-prem capability: forest-pairing guard' {
     }
 }
 
+Describe 'On-prem sidebar state machine (Get-OnPremUiState, cached -> no probe)' {
+
+    BeforeEach {
+        InModuleScope M365UserGroupManager {
+            Mock Test-GraphConnected        { $true }
+            Mock Get-CachedTenantHybridState { $true }
+            Mock Get-ConnectedTenantOnPremDomain { 'hybrid2.local' }
+            Reset-AdState
+        }
+    }
+
+    It 'CloudOnly when the tenant is not hybrid (no on-prem row)' {
+        InModuleScope M365UserGroupManager {
+            Mock Get-CachedTenantHybridState { $false }
+            (Get-OnPremUiState).State | Should -Be 'CloudOnly'
+        }
+    }
+    It 'NotConnected for a hybrid tenant before the operator connects on-prem' {
+        InModuleScope M365UserGroupManager { (Get-OnPremUiState).State | Should -Be 'NotConnected' }
+    }
+    It 'Connected after a verified connect' {
+        InModuleScope M365UserGroupManager {
+            $script:AdState.Checked = $true; $script:AdState.Available = $true
+            $script:AdState.Dc = 'dc01.hybrid2.local'; $script:AdState.DcDomain = 'hybrid2.local'
+            (Get-OnPremUiState).State | Should -Be 'Connected'
+        }
+    }
+    It 'WrongNetwork when a DC answered but in a different forest (local LAN, other VPN down)' {
+        InModuleScope M365UserGroupManager {
+            $script:AdState.Checked = $true; $script:AdState.Available = $false
+            $script:AdState.DcDomain = 'hybrid1.local'; $script:AdState.Reason = 'reachable DC is in hybrid1.local...'
+            (Get-OnPremUiState).State | Should -Be 'WrongNetwork'
+        }
+    }
+    It 'Unreachable when no DC for the expected domain answered' {
+        InModuleScope M365UserGroupManager {
+            $script:AdState.Checked = $true; $script:AdState.Available = $false
+            $script:AdState.DcDomain = $null; $script:AdState.Reason = 'No writable domain controller ... is reachable ...'
+            (Get-OnPremUiState).State | Should -Be 'Unreachable'
+        }
+    }
+    It 'NoRsat when the RSAT module is missing' {
+        InModuleScope M365UserGroupManager {
+            $script:AdState.Checked = $true; $script:AdState.Available = $false
+            $script:AdState.Reason = 'The ActiveDirectory (RSAT) module is not installed on this workstation.'
+            (Get-OnPremUiState).State | Should -Be 'NoRsat'
+        }
+    }
+}
+
 Describe 'Per-tenant on-prem profile persistence' {
 
     It 'Set/Get round-trips by tenant id, with no cross-tenant bleed, and persists each change' {
