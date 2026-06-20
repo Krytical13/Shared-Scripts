@@ -1004,14 +1004,15 @@ function Invoke-ConnectOnPrem {
             Set-Progress 'Connecting to on-premises Active Directory...'
             Get-AdWriteCapability -ExpectedDomain $expected -Force
         }
+        if ($script:UiClosing) { return }   # window closed mid-connect -> don't touch UI
         if ($cap.Available -and -not $expected) {
-            # Cold start: discovery was unscoped -> confirm the domain is really this tenant's AD.
-            $ok = [System.Windows.Forms.MessageBox]::Show(
-                ("Connected to on-premises Active Directory domain:`n`n    $($cap.DcDomain)`n`nConfirm this is the correct AD for the tenant you're signed into. " +
-                 "(If you meant a different tenant's directory, Cancel and connect to that network first.)"),
-                'Confirm on-premises domain', 'OKCancel', 'Warning')
-            if ($ok -ne 'OK') { Reset-AdState }
-            elseif ($cap.DcDomain) { Set-TenantProfileValue -Field 'ExpectedOnPremDomain' -Value $cap.DcDomain }
+            # Cold start: discovery was unscoped (possibly the workstation's own forest) -> require the
+            # operator to TYPE the domain before trusting it as this tenant's AD.
+            if (Confirm-OnPremDomain -Domain $cap.DcDomain) {
+                if ($cap.DcDomain) { Set-TenantProfileValue -Field 'ExpectedOnPremDomain' -Value $cap.DcDomain }
+            } else {
+                Reset-AdState   # declined -> un-trust the unscoped result
+            }
         }
         Update-OnPremUi
         $st = Get-AdState
@@ -1070,6 +1071,9 @@ function Complete-Connection {
     param($Context)
     $null = Invoke-WithProgress -Title "Setting up $($Context.Account)" -Work {
         Reset-HybridState            # recompute hybrid + AD-write capability for the (new) tenant
+        # A new tenant means any object loaded from the PREVIOUS tenant is stale -- clear it so it can't be
+        # re-imported under the new tenant (e.g. via Invoke-ConnectOnPrem); the tabs rebuild blank below.
+        $script:State.SelectedUser = $null; $script:State.SelectedGroup = $null
         Save-CurrentAccount
         # ONE Graph $batch fetches the org + subscribed SKUs and seeds the caches the next steps read,
         # so the whole connect bootstrap is a single round trip (falls back to per-call reads if /$batch
@@ -1781,16 +1785,11 @@ function Invoke-CreateUserInAd {
         return
     }
     # Cold-start guard: if we haven't yet learned this tenant's on-prem domain (no synced object loaded),
-    # discovery was UNSCOPED -- so confirm the discovered domain really is this tenant's AD before creating
-    # a user in it (prevents creating a tenant-#2 user in the local Hybrid1 forest by mistake). On
-    # confirm we remember it, so subsequent on-prem work for this tenant is domain-scoped.
+    # discovery was UNSCOPED and may have fallen back to the WORKSTATION's own forest. Require the operator
+    # to TYPE the discovered domain before creating a user in it -- a weak one-click OK would let a tenant-#2
+    # user land in the local Hybrid1 forest. On confirm we remember it, so later work is domain-scoped.
     if (-not $expectedDomain) {
-        $confirm = [System.Windows.Forms.MessageBox]::Show(
-            ("This will create the user in on-premises Active Directory domain:`n`n    $($cap.DcDomain)`n`n" +
-             "Confirm this is the correct AD for the tenant you're signed into. (If you meant a different " +
-             "tenant's directory, Cancel and connect to that network first.)"),
-            'Confirm on-premises domain', 'OKCancel', 'Warning')
-        if ($confirm -ne 'OK') { return }
+        if (-not (Confirm-OnPremDomain -Domain $cap.DcDomain)) { return }
         if ($cap.DcDomain) { Set-TenantProfileValue -Field 'ExpectedOnPremDomain' -Value $cap.DcDomain }
     }
     $dc = $cap.Dc
@@ -2193,8 +2192,10 @@ function Show-PasswordResetDialog {
 }
 
 function Show-TypedConfirm {
-    <# Destructive-action guard: user must type $Expected exactly to enable OK. Returns bool. #>
-    param([string]$Prompt, [string]$Expected)
+    <# Type-to-confirm guard: the user must type $Expected exactly to enable the OK button. Returns bool.
+       Default is the DESTRUCTIVE styling (red 'Delete'); -NotDanger + -OkText reuse it for a high-stakes
+       but non-destructive confirmation (e.g. trusting an on-prem domain for a tenant). #>
+    param([string]$Prompt, [string]$Expected, [string]$OkText = 'Delete', [switch]$NotDanger)
     $t = Get-Theme
     $dlg = New-Object System.Windows.Forms.Form
     $dlg.Text = 'Confirm'; $dlg.Size = New-Object System.Drawing.Size(460, 230); $dlg.StartPosition = 'CenterParent'
@@ -2202,20 +2203,34 @@ function Show-TypedConfirm {
 
     $lbl = New-Object System.Windows.Forms.Label; $lbl.Text = $Prompt; $lbl.Location = New-Object System.Drawing.Point(14, 14); $lbl.Size = New-Object System.Drawing.Size(420, 90)
     $box = New-Object System.Windows.Forms.TextBox; $box.Location = New-Object System.Drawing.Point(14, 110); $box.Size = New-Object System.Drawing.Size(420, 24)
-    $ok = New-Object System.Windows.Forms.Button; $ok.Text = 'Delete'; $ok.DialogResult = 'OK'; $ok.Location = New-Object System.Drawing.Point(264, 150); $ok.Size = New-Object System.Drawing.Size(84, 28); $ok.Enabled = $false
-    $ok.ForeColor = $t.ErrText
+    $ok = New-Object System.Windows.Forms.Button; $ok.Text = $OkText; $ok.DialogResult = 'OK'; $ok.Location = New-Object System.Drawing.Point(264, 150); $ok.Size = New-Object System.Drawing.Size(84, 28); $ok.Enabled = $false
+    if (-not $NotDanger) { $ok.ForeColor = $t.ErrText }
     $cancel = New-Object System.Windows.Forms.Button; $cancel.Text = 'Cancel'; $cancel.DialogResult = 'Cancel'; $cancel.Location = New-Object System.Drawing.Point(352, 150); $cancel.Size = New-Object System.Drawing.Size(84, 28)
     Set-SecondaryButtonStyle $ok; Set-SecondaryButtonStyle $cancel
     $box.Add_TextChanged({ $ok.Enabled = ($box.Text -ceq $Expected) }.GetNewClosure())
     $dlg.Controls.AddRange(@($lbl, $box, $ok, $cancel))
-    # Safety: Enter and Escape both CANCEL -- deleting requires an explicit click on the (red) Delete
-    # button, which only enables after the exact name is typed. Enter must never trigger a delete.
+    # Safety: Enter and Escape both CANCEL -- confirming requires an explicit click on the OK button, which
+    # only enables after the exact value is typed. Enter must never trigger the action.
     $dlg.AcceptButton = $cancel; $dlg.CancelButton = $cancel
 
-    Set-DialogTheme -Form $dlg; Set-DangerButtonStyle $ok   # dark theme + red danger Delete button
+    Set-DialogTheme -Form $dlg
+    if ($NotDanger) { Set-PrimaryButtonStyle $ok } else { Set-DangerButtonStyle $ok }
     $result = $dlg.ShowDialog()
     $dlg.Dispose()
     return ($result -eq 'OK')
+}
+
+function Confirm-OnPremDomain {
+    <# Strong confirmation before TRUSTING a cold-start, machine-discovered on-prem domain as a tenant's
+       Active Directory: the operator must TYPE the domain. This is what stops a one-click acceptance of the
+       LOCAL forest (Hybrid1) for a REMOTE tenant when discovery fell back to the workstation's own
+       domain. Returns $true only on an exact typed match. #>
+    param([Parameter(Mandatory)][string]$Domain)
+    Show-TypedConfirm -NotDanger -OkText 'Confirm' -Expected $Domain -Prompt (
+        "On-premises Active Directory domain detected:`n`n    $Domain`n`n" +
+        "This will be used as the on-prem directory for the tenant you're signed into. If you meant a " +
+        "DIFFERENT tenant's directory, Cancel and connect to that network (VPN/RDP) first.`n`n" +
+        "To confirm this is correct, type the domain name exactly:")
 }
 
 #endregion

@@ -781,10 +781,12 @@ Assert-That 'Test-OnPremReadyForObject (cached, no probe): true only when connec
         $okMatch = Test-OnPremReadyForObject $obj
         $script:AdState.DcDomain = 'hybrid1.local'        # connected, but to the WRONG forest
         $wrongForest = Test-OnPremReadyForObject $obj
+        $script:AdState.DcDomain = 'hybrid2.local'
+        $blankClosed = -not (Test-OnPremReadyForObject @{ onPremisesDomainName = '' })   # blank object domain -> fail CLOSED
         $script:AdState.Available = $false                    # connect attempt failed / not connected
         $notConnected = Test-OnPremReadyForObject $obj
         Reset-AdState
-        $okMatch -and (-not $wrongForest) -and (-not $notConnected)
+        $okMatch -and (-not $wrongForest) -and $blankClosed -and (-not $notConnected)
     }
 }
 

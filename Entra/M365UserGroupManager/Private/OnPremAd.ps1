@@ -179,7 +179,9 @@ function Test-OnPremReadyForObject {
     param($Object)
     $st = $script:AdState
     if (-not ($st.Checked -and $st.Available)) { return $false }
-    return (Test-OnPremDomainMatch -Expected ([string](Get-GraphVal $Object 'onPremisesDomainName')) -Actual $st.DcDomain)
+    $objDomain = [string](Get-GraphVal $Object 'onPremisesDomainName')
+    if (-not $objDomain) { return $false }   # fail CLOSED: no object domain -> can't verify the forest -> don't route to AD
+    return (Test-OnPremDomainMatch -Expected $objDomain -Actual $st.DcDomain)
 }
 
 # --- Cloud -> on-prem object mapping -------------------------------------------------------
