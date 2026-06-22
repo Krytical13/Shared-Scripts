@@ -688,20 +688,20 @@ function Set-UserAccountType {
     # Backup/Restore apply to the member-create form, not to a guest invite.
     $ctx.BackupBtn.Visible = -not $isGuest
     $ctx.RestoreBtn.Visible = -not $isGuest
-    # "Create in: cloud / on-prem" applies to a Member only (Guest is always a cloud B2B invite).
-    if ($ctx.DestPanel) {
-        $ctx.DestPanel.Visible = (-not $isGuest)
-        if ($isGuest) {
-            if ($ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
-            $ctx.SaveBtn.Text = '&Send invite'
-        } else {
-            # Re-apply the destination view (sets Save text + OU picker + cloud-field gating, re-checking
-            # AD reachability). Drives off the radio so a previously-chosen On-prem persists across toggles.
-            Set-UserCreateDestination -Destination $(if ($ctx.DestOnPrem -and $ctx.DestOnPrem.Checked) { 'OnPrem' } else { 'Cloud' })
-        }
-    } else {
-        $ctx.SaveBtn.Text = if ($isGuest) { '&Send invite' } else { '&Create user' }
+    # "Create in: cloud / on-prem" applies to a NEW Member only -- Guest is a cloud B2B invite, and EDIT
+    # has no create destination (showing it there is wrong; Set-TabMode hides it but used to call us right
+    # after, which re-showed it). Gate on New mode so Edit never displays the destination row.
+    $showDest = (-not $isGuest) -and ($ctx.Mode -eq 'New')
+    if ($ctx.DestPanel) { $ctx.DestPanel.Visible = $showDest }
+    if (-not $showDest -and $ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
+    if ($isGuest) {
+        $ctx.SaveBtn.Text = '&Send invite'
+    } elseif ($showDest) {
+        # Re-apply the destination view (Save text + OU picker + cloud-field gating). Drives off the radio
+        # so a previously-chosen On-prem persists across toggles.
+        Set-UserCreateDestination -Destination $(if ($ctx.DestOnPrem -and $ctx.DestOnPrem.Checked) { 'OnPrem' } else { 'Cloud' })
     }
+    # Edit + Member: leave the Save button text to Build-TabForm ('&Save changes').
 }
 
 function Initialize-OuPicker {
@@ -1375,7 +1375,9 @@ function Import-UserIntoForm {
     }
 
     Set-TabHybridGating -Tab 'User' -Object $User
-    $ctx.TargetLabel.Text = "Editing: $(Get-GraphVal $User 'displayName')  <$(Get-GraphVal $User 'userPrincipalName')>   [$(Get-ObjectSourceLabel $User)]"
+    # Keep this concise so it doesn't run under the "Choose fields..." button -- the UPN/email is already
+    # shown in the form (UPN + Primary Email), so the header just needs the name + source tag.
+    $ctx.TargetLabel.Text = "Editing: $(Get-GraphVal $User 'displayName')   [$(Get-ObjectSourceLabel $User)]"
     Set-TabActionState -Tab 'User'
     Set-Progress "Loaded user $(Get-GraphVal $User 'userPrincipalName')."
 }

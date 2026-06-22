@@ -901,6 +901,16 @@ Assert-That 'User New form has the Create-in (cloud/on-prem) toggle + OU picker 
         [bool]$u.DestPanel -and [bool]$u.DestCloud -and [bool]$u.DestOnPrem -and [bool]$u.OuPanel -and [bool]$u.OuCombo -and $u.DestCloud.Checked
     }
 }
+Assert-That 'Edit mode does NOT run the create-destination view (Create-in row is New-only)' {
+    & $mod {
+        $u = $script:UI.User
+        $u.Mode = 'Edit'; $u.SaveBtn.Text = '&Save changes'
+        Set-UserAccountType -Type 'Member'   # in Edit this must NOT call Set-UserCreateDestination...
+        $ok = ($u.SaveBtn.Text -eq '&Save changes')   # ...which would rewrite the Save text to a "Create" verb
+        $u.Mode = 'New'                       # restore for later checks
+        $ok
+    }
+}
 Assert-That 'sidebar has a Force-AD-sync button, hidden until connected to a hybrid tenant' {
     & $mod { [bool]$script:UI.SyncBtn -and (-not $script:UI.SyncBtn.Visible) }
 }

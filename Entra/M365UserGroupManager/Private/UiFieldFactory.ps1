@@ -221,6 +221,9 @@ function New-FieldRow {
             foreach ($d in (Get-VerifiedDomainList)) { [void]$dom.Items.Add($d) }
             $def = Get-DefaultVerifiedDomain
             if ($def) { $dom.Text = $def }
+            # A DropDown combo selects ALL its text on focus -- that full-width highlight looked "funky".
+            # Clear the selection on focus so it reads like a normal field (plain scriptblock; $args[0]=combo).
+            $dom.Add_GotFocus({ try { $args[0].SelectionLength = 0 } catch { } })
             $cell.Controls.Add($local, 0, 0); $cell.Controls.Add($at, 1, 0); $cell.Controls.Add($dom, 2, 0)
             $field.Main = $local; $field.Aux = $dom; $field.Cell = $cell
         }
@@ -590,6 +593,12 @@ function Set-FieldReadOnlyForSync {
     switch ($Field.Kind) {
         { $_ -in 'Text', 'Multi', 'ExtAttr' } {
             $Field.Main.ReadOnly = $true; $Field.Main.TabStop = $false; $Field.Main.BackColor = $t.ReadOnlyBg
+        }
+        'Upn' {
+            # Render the synced (read-only) UPN consistently: the local part as a clean read-only box
+            # (legible on the ReadOnlyBg, not greyed-disabled), and the domain combo non-interactive.
+            $Field.Main.ReadOnly = $true; $Field.Main.TabStop = $false; $Field.Main.BackColor = $t.ReadOnlyBg
+            if ($Field.Aux) { $Field.Aux.Enabled = $false; $Field.Aux.TabStop = $false }
         }
         'Person' {
             # Keep the list/box readable; disable only the action buttons that live in the cell.
