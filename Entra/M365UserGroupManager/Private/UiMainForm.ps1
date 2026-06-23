@@ -149,7 +149,7 @@ function New-MainForm {
 
     # --- Wire nav + connection events ------------------------------------------------------
     foreach ($item in @($navUser, $navGroup, $navExch)) {
-        $item.Button.Add_Click({ param($s, $e) Select-NavPage -Page $s.Tag })
+        $item.Button.Add_Click({ param($s, $e) Invoke-NavSwitch -Page $s.Tag })
     }
     Set-PrimaryButtonStyle $connectBtn        # the main call-to-action in the sidebar
     Set-SecondaryButtonStyle $disconnectBtn
@@ -246,6 +246,42 @@ function Select-NavPage {
     }
     $script:UI.HeaderTitle.Text = switch ($Page) { 'User' { 'Users' } 'Group' { 'Groups' } 'Exchange' { 'Exchange' } }
     Set-FormAcceptButton
+}
+
+function Test-TabDirty {
+    <# True if the User/Group tab has unsaved field edits (any enabled field changed vs its loaded /
+       initial value). Each tab saves independently -- saving one never saves another, and a nav switch
+       saves neither -- so this lets us warn before the tech moves on and forgets pending edits. Only
+       meaningful while connected with an interactive form. #>
+    param([ValidateSet('User', 'Group')][string]$Tab)
+    $ctx = $script:UI[$Tab]
+    if (-not $ctx -or -not $ctx.Order) { return $false }
+    if (-not (Test-GraphConnected)) { return $false }
+    foreach ($field in $ctx.Order) { if (Test-FieldDirty $field) { return $true } }
+    return $false
+}
+
+function Confirm-LeaveUnsavedChanges {
+    <# If the CURRENT User/Group tab has unsaved edits, confirm an action that leaves them. Returns $true
+       to proceed, $false to stay. $Consequence tells the operator what happens to the edits. #>
+    param([string]$ActionLabel = 'Continue', [string]$Consequence = "Your changes stay in the form but aren't saved.")
+    $cur = $script:UI.CurrentPage
+    if ($cur -notin 'User', 'Group') { return $true }
+    if (-not (Test-TabDirty -Tab $cur)) { return $true }
+    $ans = [System.Windows.Forms.MessageBox]::Show(
+        "You have unsaved changes on $cur. Saving another tab won't save them, and this won't either. $Consequence`n`n$ActionLabel anyway?",
+        'Unsaved changes', 'YesNo', 'Warning')
+    return ($ans -eq 'Yes')
+}
+
+function Invoke-NavSwitch {
+    <# Nav-button click with an unsaved-changes guard. The edits are NOT lost on a tab switch -- they stay
+       in the form -- but the operator should know they're unsaved (and that saving the other tab won't
+       save them) before moving on. #>
+    param([ValidateSet('User', 'Group', 'Exchange')][string]$Page)
+    if ($script:UI.CurrentPage -eq $Page) { return }
+    if (-not (Confirm-LeaveUnsavedChanges -ActionLabel "Switch to $Page")) { return }
+    Select-NavPage -Page $Page
 }
 
 function New-EntityTab {
@@ -1158,6 +1194,8 @@ function Invoke-Account {
     <# Connect / Switch-account button. No saved accounts + not connected -> sign in directly;
        otherwise show the account picker. #>
     if ($script:UI.Busy) { return }   # a connect/switch is already running; ignore a double-click
+    # Switching account rebuilds the forms for the new tenant -> unsaved edits would be lost. Warn first.
+    if (-not (Confirm-LeaveUnsavedChanges -ActionLabel 'Switch account' -Consequence 'They will be discarded when the session changes.')) { return }
     $accounts = @($script:Config.Accounts)
     if ($accounts.Count -eq 0 -and -not (Test-GraphConnected)) { Connect-NewAccount; return }
 
@@ -1190,6 +1228,7 @@ function Invoke-Account {
 
 function Invoke-Disconnect {
     if ($script:UI.Busy) { return }   # don't disconnect underneath an in-flight connect/switch
+    if (-not (Confirm-LeaveUnsavedChanges -ActionLabel 'Disconnect' -Consequence 'They will be discarded.')) { return }
     Disconnect-GraphSafe
     Disconnect-ExoSafe                 # the EXO session belonged to this Graph tenant
     Reset-HybridState                  # clear cached hybrid + AD-write capability

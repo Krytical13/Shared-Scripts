@@ -495,6 +495,7 @@ function Set-FieldValue {
                 $d = $Matches[2]
                 if (-not ($Field.Aux.Items -contains $d)) { [void]$Field.Aux.Items.Add($d) }
                 $Field.Aux.Text = $d
+                try { $Field.Aux.SelectionLength = 0 } catch { }   # don't leave the domain text auto-selected (blue highlight)
             } else {
                 $Field.Main.Text = $sv
             }
@@ -595,10 +596,21 @@ function Set-FieldReadOnlyForSync {
             $Field.Main.ReadOnly = $true; $Field.Main.TabStop = $false; $Field.Main.BackColor = $t.ReadOnlyBg
         }
         'Upn' {
-            # Render the synced (read-only) UPN consistently: the local part as a clean read-only box
-            # (legible on the ReadOnlyBg, not greyed-disabled), and the domain combo non-interactive.
+            # Render a synced (read-only) UPN as a SINGLE clean read-only box, matching every other
+            # read-only field. We fold the domain into the local box and HIDE the '@' + domain combo,
+            # because a disabled ComboBox renders inconsistently (notably an odd blue tint under .NET 10
+            # native dark mode). Span the box across the cell's columns so the full UPN fits.
+            $loc = ([string]$Field.Main.Text).Trim()
+            $dom = if ($Field.Aux) { ([string]$Field.Aux.Text).Trim().TrimStart('@') } else { '' }
+            if ($loc -and $dom -and ($loc -notmatch '@')) { $Field.Main.Text = "$loc@$dom" }
             $Field.Main.ReadOnly = $true; $Field.Main.TabStop = $false; $Field.Main.BackColor = $t.ReadOnlyBg
-            if ($Field.Aux) { $Field.Aux.Enabled = $false; $Field.Aux.TabStop = $false }
+            if ($Field.Aux) { $Field.Aux.Visible = $false }
+            if ($Field.Cell -and $Field.Cell.Controls) {
+                foreach ($c in $Field.Cell.Controls) {
+                    if (($c -is [System.Windows.Forms.Label]) -and ($c.Text -eq '@')) { $c.Visible = $false }
+                }
+                try { $Field.Cell.SetColumnSpan($Field.Main, 3) } catch { }   # local box spans the full cell width
+            }
         }
         'Person' {
             # Keep the list/box readable; disable only the action buttons that live in the cell.

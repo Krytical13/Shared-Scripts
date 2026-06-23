@@ -911,6 +911,9 @@ Assert-That 'Edit mode does NOT run the create-destination view (Create-in row i
         $ok
     }
 }
+Assert-That 'unsaved-changes guard does not fire pre-connect (Test-TabDirty is false when disconnected)' {
+    & $mod { (-not (Test-TabDirty -Tab 'User')) -and (-not (Test-TabDirty -Tab 'Group')) }
+}
 Assert-That 'sidebar has a Force-AD-sync button, hidden until connected to a hybrid tenant' {
     & $mod { [bool]$script:UI.SyncBtn -and (-not $script:UI.SyncBtn.Visible) }
 }
