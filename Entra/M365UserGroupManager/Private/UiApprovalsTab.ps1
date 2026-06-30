@@ -133,8 +133,12 @@ function Invoke-ApprovalDecision {
     if ($a.List.SelectedItems.Count -eq 0) { return }
     $tag = $a.List.SelectedItems[0].Tag
     $verb = if ($Decision -eq 'approve') { 'Approve' } else { 'Reject' }
-    $note = Show-TextInput -Title "$verb request" -Prompt "$verb the request from $($tag.Upn).`n`nOptional note (recorded with the decision):" -Default ''
+    $note = Show-TextInput -Title "$verb request" -Prompt "$verb the request from $($tag.Upn).`n`nReason / justification (REQUIRED -- recorded with the decision):" -Default ''
     if ($null -eq $note) { return }   # cancelled
+    if ([string]::IsNullOrWhiteSpace($note)) {
+        [System.Windows.Forms.MessageBox]::Show('A justification is required to approve or reject a request.', "$verb request", 'OK', 'Warning') | Out-Null
+        return
+    }
     Set-UiBusy $true
     try {
         $ok = $true; $msg = ''

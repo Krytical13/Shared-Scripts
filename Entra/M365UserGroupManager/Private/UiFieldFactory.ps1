@@ -573,6 +573,15 @@ function Set-FieldBaseline {
 function Test-FieldDirty {
     param($Field)
     if ($Field.Kind -eq 'Password' -and $Field.Mode -eq 'Edit') { return $false }
+    # A field the operator can't edit (read-only / disabled -- e.g. a synced on-prem-mastered attribute, or
+    # the folded read-only UPN) can NOT hold an unsaved user change. Treat it as clean: this stops a false
+    # "unsaved changes" prompt on an untouched Edit form AND stops a representation quirk being written on save.
+    $m = $Field.Main
+    if ($m) {
+        $ro = $false
+        try { $ro = [bool]$m.ReadOnly } catch { }   # TextBox/Multi expose ReadOnly; others don't
+        if ($ro -or (-not $m.Enabled)) { return $false }
+    }
     return ((Get-FieldComparable $Field) -ne $Field.Baseline)
 }
 
