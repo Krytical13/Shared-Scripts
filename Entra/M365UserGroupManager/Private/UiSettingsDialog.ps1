@@ -17,7 +17,7 @@ function Show-SettingsDialog {
     $enabled = @($script:Config[$key].Enabled)
 
     $dlg = New-Object System.Windows.Forms.Form
-    $dlg.Text = "$Tab fields shown when editing"
+    $dlg.Text = "$Tab fields to show on the form"
     $dlg.Size = New-Object System.Drawing.Size(560, 620)
     $dlg.MinimumSize = New-Object System.Drawing.Size(460, 420)
     $dlg.StartPosition = 'CenterParent'
@@ -39,7 +39,7 @@ function Show-SettingsDialog {
     $btnDef = New-Object System.Windows.Forms.Button; $btnDef.Text = '&Defaults'; $btnDef.Width = 80; $btnDef.Height = 26
     Set-SecondaryButtonStyle $btnAll; Set-SecondaryButtonStyle $btnNone; Set-SecondaryButtonStyle $btnDef
     $note = New-Object System.Windows.Forms.Label
-    $note.Text = '  Edit view; New forms show the create essentials'; $note.AutoSize = $true
+    $note.Text = '  Shown when editing; create-settable ones also appear when creating (read-only/license/manager: edit only)'; $note.AutoSize = $true
     $note.ForeColor = $t.Muted; $note.Margin = New-Object System.Windows.Forms.Padding(12, 9, 3, 0)
     $topBar.Controls.AddRange(@($btnAll, $btnNone, $btnDef, $note))
     $root.Controls.Add($topBar, 0, 0)

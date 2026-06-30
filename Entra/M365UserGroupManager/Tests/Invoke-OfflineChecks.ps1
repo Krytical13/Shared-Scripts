@@ -992,6 +992,21 @@ Assert-That 'an untouched New form is NOT dirty: every field baseline matches it
         $dirty.Count -eq 0
     }
 }
+Assert-That 'Choose-fields drives the New form too: enabled create-settable fields show; read-only/manager stay edit-only' {
+    & $mod {
+        $u = $script:UI.User
+        $script:Config.Users.Enabled = @(@(Get-DefaultEnabledNames -Tab 'User') + 'jobTitle' + 'department' + 'onPremisesSyncEnabled' + 'manager' | Select-Object -Unique)
+        Set-TabMode -Tab 'User' -Mode 'New'
+        $new = @($u.Order | ForEach-Object { $_.Attr.Name })
+        Set-TabMode -Tab 'User' -Mode 'Edit'
+        $edit = @($u.Order | ForEach-Object { $_.Attr.Name })
+        # create-settable Text fields now appear on the New form; read-only + Person (manager) do NOT
+        # (can't be set at create) but DO appear in Edit.
+        ($new -contains 'jobTitle') -and ($new -contains 'department') -and
+        (-not ($new -contains 'onPremisesSyncEnabled')) -and (-not ($new -contains 'manager')) -and
+        ($edit -contains 'onPremisesSyncEnabled') -and ($edit -contains 'manager')
+    }
+}
 Assert-That 'sidebar has a Force-AD-sync button, hidden until connected to a hybrid tenant' {
     & $mod { [bool]$script:UI.SyncBtn -and (-not $script:UI.SyncBtn.Visible) }
 }

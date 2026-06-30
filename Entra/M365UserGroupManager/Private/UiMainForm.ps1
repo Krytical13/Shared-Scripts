@@ -674,8 +674,15 @@ function Build-TabForm {
         # create -- so the new-hire form stays focused. Edit mode shows the Settings-enabled set
         # (you complete the rest after the auto-switch to Edit on create).
         $attrs = @($group.Attributes | Where-Object {
-                if ($ctx.Mode -eq 'New') { $_.ShowOnNew -or $_.Required -or $_.RequiredForCreate }
-                else { $enabled -contains $_.Name }
+                if ($ctx.Mode -eq 'New') {
+                    # Create form = the always-on essentials, PLUS any ENABLED (Choose fields) attribute that
+                    # can actually be set while creating. Read-only / license / manager(Person) fields can't
+                    # be set at create, so they stay Edit-only (Build-UserPayload skips Person/License +
+                    # non-Writable anyway -- showing them on New would mislead). On-prem-authority extras get
+                    # hidden again by Set-CreateDestinationFields when an on-prem create is chosen.
+                    $_.ShowOnNew -or $_.Required -or $_.RequiredForCreate -or
+                    (($enabled -contains $_.Name) -and $_.Writable -and ($_.Input -notin 'ReadOnly', 'License', 'Person', 'Password'))
+                } else { $enabled -contains $_.Name }
             })
         if ($attrs.Count -eq 0) { continue }
         [void]$plan.Add(@{ Header = $group.Name })
