@@ -25,20 +25,11 @@ function New-DeviceTab {
     $page = New-Object System.Windows.Forms.Panel
     $page.Dock = 'Fill'; $page.BackColor = $t.Surface; $page.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 8)
 
-    # --- Disconnected overlay (mirrors the User/Group empty-state) --------------------------
-    $overlay = New-Object System.Windows.Forms.TableLayoutPanel
-    $overlay.Dock = 'Fill'; $overlay.BackColor = $t.Surface; $overlay.ColumnCount = 1; $overlay.RowCount = 3
-    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 38)))
-    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 62)))
-    $ov = New-Object System.Windows.Forms.FlowLayoutPanel
-    $ov.FlowDirection = 'TopDown'; $ov.WrapContents = $false; $ov.AutoSize = $true; $ov.AutoSizeMode = 'GrowAndShrink'; $ov.Anchor = 'None'
-    $ovTitle = New-Object System.Windows.Forms.Label; $ovTitle.Text = 'Devices'; $ovTitle.Font = $t.FontLarge; $ovTitle.ForeColor = $t.Header; $ovTitle.AutoSize = $true; $ovTitle.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 6)
-    $ovText = New-Object System.Windows.Forms.Label; $ovText.Text = 'Find a device and clean it up across AD, SCCM, Intune and Entra after a re-image. Connect to Microsoft 365 to begin.'
-    $ovText.AutoSize = $true; $ovText.MaximumSize = New-Object System.Drawing.Size(440, 0); $ovText.ForeColor = $t.Muted; $ovText.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 14)
-    $ovBtn = New-Object System.Windows.Forms.Button; $ovBtn.Text = 'Connect to Microsoft 365'; $ovBtn.Width = 240; $ovBtn.Height = 38; $ovBtn.Font = $t.FontMedium
-    Set-PrimaryButtonStyle $ovBtn; $ovBtn.Add_Click({ Invoke-Account })
-    $ov.Controls.AddRange(@($ovTitle, $ovText, $ovBtn)); $overlay.Controls.Add($ov, 0, 1)
+    # --- Disconnected overlay: shared locked-overlay helper --------------------------------
+    $devOv = New-LockedOverlay -Title 'Devices' `
+        -Body 'Find a device and clean it up across AD, SCCM, Intune and Entra after a re-image. Connect to Microsoft 365 to begin.' `
+        -ButtonText 'Connect to Microsoft 365' -OnClick { Invoke-Account }
+    $overlay = $devOv.Panel
     $page.Controls.Add($overlay)
 
     # --- Management content (shown when connected) -----------------------------------------

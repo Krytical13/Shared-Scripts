@@ -20,28 +20,12 @@ function New-ExchangeTab {
     $page = New-Object System.Windows.Forms.Panel
     $page.Dock = 'Fill'; $page.BackColor = $t.Surface; $page.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 8)
 
-    # --- Activation (empty state) panel ----------------------------------------------------
-    $act = New-Object System.Windows.Forms.TableLayoutPanel
-    $act.Dock = 'Fill'; $act.ColumnCount = 1; $act.RowCount = 3
-    [void]$act.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 38)))
-    [void]$act.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-    [void]$act.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 62)))
-
-    $content = New-Object System.Windows.Forms.FlowLayoutPanel
-    $content.FlowDirection = 'TopDown'; $content.WrapContents = $false; $content.AutoSize = $true
-    $content.AutoSizeMode = 'GrowAndShrink'; $content.Anchor = 'None'
-    $title = New-Object System.Windows.Forms.Label
-    $title.Text = 'Exchange Online'; $title.Font = $t.FontLarge; $title.ForeColor = $t.Header; $title.AutoSize = $true
-    $title.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 6)
-    $explain = New-Object System.Windows.Forms.Label
-    $explain.Text = "Distribution lists, mail-enabled security groups, and shared, room, and equipment mailboxes are managed through Exchange Online -- a separate sign-in from Microsoft Graph."
-    $explain.AutoSize = $true; $explain.MaximumSize = New-Object System.Drawing.Size(440, 0); $explain.ForeColor = $t.Muted
-    $explain.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 14)
-    $connectExo = New-Object System.Windows.Forms.Button
-    $connectExo.Text = 'Connect to Exchange Online'; $connectExo.Width = 240; $connectExo.Height = 38; $connectExo.Font = $t.FontMedium
-    Set-PrimaryButtonStyle $connectExo
-    $content.Controls.AddRange(@($title, $explain, $connectExo))
-    $act.Controls.Add($content, 0, 1)
+    # --- Activation (empty state) panel: shared locked-overlay helper (Connect routes to EXO, not Graph) --
+    $exoOv = New-LockedOverlay -Title 'Exchange Online' `
+        -Body "Distribution lists, mail-enabled security groups, and shared, room, and equipment mailboxes are managed through Exchange Online -- a separate sign-in from Microsoft Graph." `
+        -ButtonText 'Connect to Exchange Online' -OnClick { Invoke-ExoConnect }
+    $act = $exoOv.Panel
+    $connectExo = $exoOv.Button
     $page.Controls.Add($act)
 
     # --- Management panel ------------------------------------------------------------------
@@ -127,7 +111,7 @@ function New-ExchangeTab {
     }
 
     # --- Events ----------------------------------------------------------------------------
-    $connectExo.Add_Click({ Invoke-ExoConnect })
+    # ($connectExo click is wired by New-LockedOverlay -OnClick above.)
     $exoDisconnect.Add_Click({ Invoke-ExoDisconnect })
     $typeCombo.Add_SelectedIndexChanged({ if ($script:AppReady) { $script:UI.Exchange.ModeNew.Checked = $true; Set-ExchangeMode -Mode 'New' } })
     $modeNew.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-ExchangeMode -Mode 'New' } })

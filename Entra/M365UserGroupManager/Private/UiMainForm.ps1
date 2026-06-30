@@ -359,6 +359,41 @@ function Invoke-NavSwitch {
     Select-NavPage -Page $Page
 }
 
+function New-LockedOverlay {
+    <# Shared "connect first" empty-state for the gated pages (Users/Groups + Exchange/Devices/Approvals):
+       a centered title + one body line + a single primary Connect button, returned as @{ Panel; Button }.
+       The CALLER stashes Panel under the key its Update-*Activation reads (the keys diverge: ActivationPanel
+       vs Overlay), so the helper never hardcodes a key. -OnClick is a parameter because Exchange connects
+       to Exchange Online (Invoke-ExoConnect) while the others connect to Graph (Invoke-Account) -- a
+       hardcoded handler would silently break the EXO gate. (No lock emoji: U+1F512 is non-BMP and [char]
+       can't hold it on PS 5.1; the centered card already reads as gated.) #>
+    param([string]$Title, [string]$Body, [string]$ButtonText, [scriptblock]$OnClick)
+    $t = Get-Theme
+    $panel = New-Object System.Windows.Forms.TableLayoutPanel
+    $panel.Dock = 'Fill'; $panel.BackColor = $t.Surface; $panel.ColumnCount = 1; $panel.RowCount = 3
+    [void]$panel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 38)))
+    [void]$panel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    [void]$panel.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 62)))
+    $content = New-Object System.Windows.Forms.FlowLayoutPanel
+    $content.FlowDirection = 'TopDown'; $content.WrapContents = $false; $content.AutoSize = $true
+    $content.AutoSizeMode = 'GrowAndShrink'; $content.Anchor = 'None'
+    # NB: locals must NOT collide with the [string] params ($Title/$Body) -- PowerShell vars are
+    # case-insensitive, so a $title local would inherit the [string] constraint and coerce the Label.
+    $titleLbl = New-Object System.Windows.Forms.Label
+    $titleLbl.Text = $Title; $titleLbl.Font = $t.FontLarge; $titleLbl.ForeColor = $t.Header; $titleLbl.AutoSize = $true
+    $titleLbl.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 6)
+    $bodyLbl = New-Object System.Windows.Forms.Label
+    $bodyLbl.Text = $Body; $bodyLbl.AutoSize = $true; $bodyLbl.MaximumSize = New-Object System.Drawing.Size(440, 0); $bodyLbl.ForeColor = $t.Muted
+    $bodyLbl.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 14)
+    $actionBtn = New-Object System.Windows.Forms.Button
+    $actionBtn.Text = $ButtonText; $actionBtn.Width = 240; $actionBtn.Height = 38; $actionBtn.Font = $t.FontMedium
+    Set-PrimaryButtonStyle $actionBtn
+    if ($OnClick) { $actionBtn.Add_Click($OnClick) }
+    $content.Controls.AddRange(@($titleLbl, $bodyLbl, $actionBtn))
+    $panel.Controls.Add($content, 0, 1)
+    return @{ Panel = $panel; Button = $actionBtn }
+}
+
 function New-EntityTab {
     param([ValidateSet('User', 'Group')][string]$Tab, [string]$Title)
     $t = Get-Theme
@@ -533,27 +568,10 @@ function New-EntityTab {
     # Until connected, cover the form with a centered call-to-action (mirroring the Exchange tab) so
     # the user isn't presented with an editable-but-dead form and a greyed-out Create button with no
     # in-context reason. This panel is also the tab's on-canvas H1 (the top tier of the type scale).
-    $overlay = New-Object System.Windows.Forms.TableLayoutPanel
-    $overlay.Dock = 'Fill'; $overlay.BackColor = $t.Surface; $overlay.ColumnCount = 1; $overlay.RowCount = 3
-    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 38)))
-    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))
-    [void]$overlay.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 62)))
-    $ovContent = New-Object System.Windows.Forms.FlowLayoutPanel
-    $ovContent.FlowDirection = 'TopDown'; $ovContent.WrapContents = $false; $ovContent.AutoSize = $true
-    $ovContent.AutoSizeMode = 'GrowAndShrink'; $ovContent.Anchor = 'None'
-    $ovTitle = New-Object System.Windows.Forms.Label
-    $ovTitle.Text = "Manage $($Title.ToLower())"; $ovTitle.Font = $t.FontLarge; $ovTitle.ForeColor = $t.Header; $ovTitle.AutoSize = $true
-    $ovTitle.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 6)
-    $ovExplain = New-Object System.Windows.Forms.Label
-    $ovExplain.Text = "Create a new $entityWord or edit an existing one. Connect to Microsoft 365 to begin."
-    $ovExplain.AutoSize = $true; $ovExplain.MaximumSize = New-Object System.Drawing.Size(440, 0); $ovExplain.ForeColor = $t.Muted
-    $ovExplain.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 14)
-    $ovBtn = New-Object System.Windows.Forms.Button
-    $ovBtn.Text = 'Connect to Microsoft 365'; $ovBtn.Width = 240; $ovBtn.Height = 38; $ovBtn.Font = $t.FontMedium
-    Set-PrimaryButtonStyle $ovBtn
-    $ovBtn.Add_Click({ Invoke-Account })
-    $ovContent.Controls.AddRange(@($ovTitle, $ovExplain, $ovBtn))
-    $overlay.Controls.Add($ovContent, 0, 1)
+    $ov = New-LockedOverlay -Title "Manage $($Title.ToLower())" `
+        -Body "Create a new $entityWord or edit an existing one. Connect to Microsoft 365 to begin." `
+        -ButtonText 'Connect to Microsoft 365' -OnClick { Invoke-Account }
+    $overlay = $ov.Panel
     $page.Controls.Add($overlay)
     $overlay.BringToFront()
 
