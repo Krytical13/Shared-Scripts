@@ -962,6 +962,17 @@ Assert-That 'Edit mode does NOT run the create-destination view (Create-in row i
         $ok
     }
 }
+Assert-That 'create-destination: picking On-prem while not connected bounces back to Cloud (no misroute)' {
+    & $mod {
+        $u = $script:UI.User
+        $u.Mode = 'New'; $u.OnPremEnabled = $false; $u.CurrentDest = 'Cloud'
+        $u.DestCombo.SelectedIndex = 0
+        $u.DestCombo.SelectedIndex = 1   # operator tries On-prem -> SelectedIndexChanged bounces it (sentinel)
+        # After the bounce: combo is back on Cloud AND the authoritative CurrentDest stays Cloud, so a save
+        # would route to the cloud (Invoke-SaveUser branches on CurrentDest -eq 'OnPrem', not the raw index).
+        ($u.DestCombo.SelectedIndex -eq 0) -and ($u.CurrentDest -eq 'Cloud')
+    }
+}
 Assert-That 'unsaved-changes guard does not fire pre-connect (Test-TabDirty is false when disconnected)' {
     & $mod { (-not (Test-TabDirty -Tab 'User')) -and (-not (Test-TabDirty -Tab 'Group')) }
 }

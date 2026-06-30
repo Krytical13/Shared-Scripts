@@ -586,7 +586,7 @@ function New-EntityTab {
         BackupBtn = $backupBtn; RestoreBtn = $restoreBtn; MoreBtn = $moreBtn; MoreMenu = $moreMenu
         TypeCombo = $typeCombo
         GuestBox = $guestBox; GuestEmail = $gEmail; GuestName = $gName; GuestSend = $gSend; GuestUrl = $gUrl
-        DestLbl = $destLbl; DestCombo = $destCombo; OnPremEnabled = $false; DestSuppress = $false
+        DestLbl = $destLbl; DestCombo = $destCombo; OnPremEnabled = $false; DestSuppress = $false; CurrentDest = 'Cloud'
         OuPanel = $ouPanel; OuCombo = $ouCombo
         CurrentKind = 'Security'   # Group tab: which kind's view is showing (driven by the GroupType radio / loaded group)
     }
@@ -1266,6 +1266,13 @@ function Complete-Connection {
         if ($script:UI.User -and $script:UI.User.DestCombo) {
             $script:UI.User.OnPremEnabled = $true   # sentinel: on-prem pick is now allowed (AD check still defers to selection)
             $script:UI.Tooltip.SetToolTip($script:UI.User.DestCombo, 'Member: a normal account. Create in: Entra cloud, or on-premises AD (availability is checked when you select it).')
+            # A tenant SWITCH must not carry the previous tenant's create-destination forward: a stale
+            # "On-premises AD" selection + the old tenant's cached OU list could route a create into the
+            # WRONG tenant's AD/OU. Force a clean Cloud baseline + drop the stale OUs; the next On-prem pick
+            # re-probes AD and reloads OUs scoped to the now-connected tenant.
+            if ($script:UI.User.OuCombo) { $script:UI.User.OuCombo.Items.Clear() }
+            $script:UI.User.DestSuppress = $true; $script:UI.User.DestCombo.SelectedIndex = 0; $script:UI.User.DestSuppress = $false
+            Set-UserCreateDestination -Destination 'Cloud'
         }
     }
     $missing = Get-MissingScopes
@@ -1853,7 +1860,10 @@ function Invoke-SaveUser {
 
     # On-prem create routes to AD BEFORE the cloud license/usageLocation guard below -- those fields are
     # hidden (and irrelevant) for an on-prem create, and the guard reads them visibility-independently.
-    if ($mode -eq 'New' -and $ctx.DestCombo -and $ctx.DestCombo.SelectedIndex -eq 1) {
+    # Route on CurrentDest (authoritative: set to 'OnPrem' ONLY after a SUCCESSFUL AD probe for the
+    # currently-connected tenant -- see Set-UserCreateDestination), not the raw combo index. A stale index
+    # can't misroute a create into the wrong tenant's AD; the combo is just the operator's intent signal.
+    if ($mode -eq 'New' -and $ctx.CurrentDest -eq 'OnPrem') {
         Invoke-CreateUserInAd
         return
     }
