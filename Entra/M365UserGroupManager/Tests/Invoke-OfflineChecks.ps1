@@ -976,6 +976,22 @@ Assert-That 'create-destination: picking On-prem while not connected bounces bac
 Assert-That 'unsaved-changes guard does not fire pre-connect (Test-TabDirty is false when disconnected)' {
     & $mod { (-not (Test-TabDirty -Tab 'User')) -and (-not (Test-TabDirty -Tab 'Group')) }
 }
+Assert-That 'an untouched New form is NOT dirty: every field baseline matches its built value (incl. defaults)' {
+    & $mod {
+        # Build-TabForm must capture baselines AFTER New-mode defaults (accountEnabled=checked,
+        # GroupType=Security) -- otherwise those read dirty against an empty baseline and every tab
+        # switch falsely warns "unsaved changes".
+        $dirty = @()
+        foreach ($tab in 'User', 'Group') {
+            Set-TabMode -Tab $tab -Mode 'New'
+            foreach ($f in $script:UI[$tab].Order) {
+                if ((Get-FieldComparable $f) -ne $f.Baseline) { $dirty += "$tab/$($f.Attr.Name)" }
+            }
+        }
+        if ($dirty.Count) { Write-Host "      falsely-dirty: $($dirty -join ', ')" -ForegroundColor Yellow }
+        $dirty.Count -eq 0
+    }
+}
 Assert-That 'sidebar has a Force-AD-sync button, hidden until connected to a hybrid tenant' {
     & $mod { [bool]$script:UI.SyncBtn -and (-not $script:UI.SyncBtn.Visible) }
 }

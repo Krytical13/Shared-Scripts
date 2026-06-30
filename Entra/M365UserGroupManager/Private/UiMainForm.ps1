@@ -775,6 +775,11 @@ function Build-TabForm {
 
     $tlp.ResumeLayout()
     Set-ControlTheme -Root $tlp     # dark-theme the freshly (re)built field controls
+    # Capture each field's baseline as its freshly-built INITIAL state -- including New-mode defaults
+    # (accountEnabled=checked, GroupType=Security, a Choice's index-0 value) -- so an UNTOUCHED form is
+    # never reported dirty (the "unsaved changes" guard fired on every tab switch in New mode without this).
+    # In Edit mode this is re-captured by Import-*IntoForm AFTER prefill, so this is the New-mode source of truth.
+    foreach ($f in $ctx.Order) { Set-FieldBaseline -Field $f }
     $ctx.SaveBtn.Text = if ($ctx.Mode -eq 'New') { "&Create $(if ($Tab -eq 'User') { 'user' } else { 'group' })" } else { '&Save changes' }
     Set-TabActionState -Tab $Tab
 }
