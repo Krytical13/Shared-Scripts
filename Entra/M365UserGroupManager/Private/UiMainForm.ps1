@@ -332,48 +332,51 @@ function New-EntityTab {
     # WrapContents so this busy row reflows onto a second line on a narrow window instead of clipping the
     # trailing controls (e.g. the target label) -- the header host gives it the height it needs.
     $left.Dock = 'Fill'; $left.FlowDirection = 'LeftToRight'; $left.WrapContents = $true
-    $modeNew = New-Object System.Windows.Forms.RadioButton; $modeNew.Text = "&New $entityWord"; $modeNew.AutoSize = $true; $modeNew.Checked = $true; $modeNew.Margin = New-Object System.Windows.Forms.Padding(3, 10, 8, 3)
-    $modeEdit = New-Object System.Windows.Forms.RadioButton; $modeEdit.Text = '&Edit existing'; $modeEdit.AutoSize = $true; $modeEdit.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
+    # Mode: New vs Edit -- a segmented (pill) toggle. RadioButtons with Appearance=Button share one
+    # immediate parent ($modePanel), so they remain a single mutually-exclusive group and .Checked
+    # semantics are unchanged (Set-TabMode + the post-create handoff still set .Checked = $true).
+    $modePanel = New-Object System.Windows.Forms.FlowLayoutPanel
+    $modePanel.AutoSize = $true; $modePanel.AutoSizeMode = 'GrowAndShrink'; $modePanel.FlowDirection = 'LeftToRight'; $modePanel.WrapContents = $false
+    $modePanel.Margin = New-Object System.Windows.Forms.Padding(3, 7, 12, 3); $modePanel.Padding = New-Object System.Windows.Forms.Padding(0)
+    $mkSeg = {
+        param($btn)
+        $btn.Appearance = 'Button'; $btn.FlatStyle = 'Flat'; $btn.AutoSize = $true; $btn.TextAlign = 'MiddleCenter'
+        $btn.MinimumSize = New-Object System.Drawing.Size(94, $t.BtnH); $btn.Margin = New-Object System.Windows.Forms.Padding(0)
+        $btn.BackColor = $t.SurfaceAlt; $btn.ForeColor = $t.Text
+        $btn.FlatAppearance.BorderSize = 1; $btn.FlatAppearance.BorderColor = $t.CtrlBorder; $btn.FlatAppearance.CheckedBackColor = $t.Brand
+    }
+    $modeNew = New-Object System.Windows.Forms.RadioButton; $modeNew.Text = "&New $entityWord"; $modeNew.Checked = $true; & $mkSeg $modeNew
+    $modeEdit = New-Object System.Windows.Forms.RadioButton; $modeEdit.Text = '&Edit existing'; & $mkSeg $modeEdit
+    $modePanel.Controls.AddRange(@($modeNew, $modeEdit))
     # Surface the progressive-disclosure model at the point of choice (recognition over recall).
     $script:UI.Tooltip.SetToolTip($modeNew, "Create a new $entityWord -- shows just the essentials. Complete the rest in Edit after it's created.")
     $script:UI.Tooltip.SetToolTip($modeEdit, "Modify an existing $entityWord -- shows all the fields you've enabled via Choose fields.")
-    # Account type (User tab only): create a Member, or invite an external Guest. These radios MUST
-    # live in their own container -- WinForms groups radio buttons by their immediate parent, so
-    # putting them in the same panel as New/Edit would make all four one mutually-exclusive group.
-    $typePanel = $null; $typeMember = $null; $typeGuest = $null
+    # Account type (User tab only): create a Member, or invite an external Guest -- a dropdown (was radios).
+    $typeCombo = $null
     if ($Tab -eq 'User') {
-        $typePanel = New-Object System.Windows.Forms.FlowLayoutPanel
-        $typePanel.AutoSize = $true; $typePanel.AutoSizeMode = 'GrowAndShrink'; $typePanel.FlowDirection = 'LeftToRight'; $typePanel.WrapContents = $false; $typePanel.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 4)
-        # Faint tinted card so Member/Guest read as one group distinct from New/Edit (Gestalt > a hairline glyph).
-        $typePanel.BackColor = $t.SurfaceAlt; $typePanel.Padding = New-Object System.Windows.Forms.Padding(4, 0, 6, 0)
-        # Visible divider (Muted = 5.4:1, not the near-invisible Border at 1.35:1) so the account-type
-        # radios read as a separate group from New/Edit -- a perceivable Gestalt boundary (SC 1.4.11).
-        $typeSep = New-Object System.Windows.Forms.Label; $typeSep.Text = '|'; $typeSep.AutoSize = $true; $typeSep.ForeColor = $t.Muted; $typeSep.Margin = New-Object System.Windows.Forms.Padding(2, 10, 6, 3)
-        $typeMember = New-Object System.Windows.Forms.RadioButton; $typeMember.Text = '&Member'; $typeMember.AutoSize = $true; $typeMember.Checked = $true; $typeMember.Margin = New-Object System.Windows.Forms.Padding(3, 10, 6, 3)
-        $typeGuest = New-Object System.Windows.Forms.RadioButton; $typeGuest.Text = '&Guest (invite)'; $typeGuest.AutoSize = $true; $typeGuest.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
-        $typePanel.Controls.AddRange(@($typeSep, $typeMember, $typeGuest))
+        $typeCombo = New-Object System.Windows.Forms.ComboBox
+        $typeCombo.DropDownStyle = 'DropDownList'; $typeCombo.Width = 132; $typeCombo.Margin = New-Object System.Windows.Forms.Padding(3, 8, 12, 3)
+        [void]$typeCombo.Items.AddRange(@('Member', 'Guest (invite)')); $typeCombo.SelectedIndex = 0
+        $script:UI.Tooltip.SetToolTip($typeCombo, 'Member = a normal account in this tenant. Guest = invite an external person by email.')
     }
-    # Create destination (User tab only): a cloud user (Entra, New-MgUser) or an on-prem AD user that
-    # syncs up via Entra Connect. Lives as a row at the TOP OF THE FORM (not the header, which has no
-    # room) -- shown only for Member + New + when a writable DC is reachable. Own container (radios
-    # group by parent). Built here; placed in the form host below.
-    $destPanel = $null; $destCloud = $null; $destOnPrem = $null
+    # Create destination (User tab only): a cloud user (Entra, New-MgUser) or an on-prem AD user that syncs
+    # up via Entra Connect -- a dropdown folded INTO the header (was a radio row at the top of the form).
+    # Shown only for Member + New; the on-prem item is gated by a sentinel ($ctx.OnPremEnabled) + bounce-back
+    # in the SelectedIndexChanged handler, since a ComboBox cannot disable a single item.
+    $destLbl = $null; $destCombo = $null
     if ($Tab -eq 'User') {
-        $destPanel = New-Object System.Windows.Forms.FlowLayoutPanel
-        $destPanel.AutoSize = $true; $destPanel.AutoSizeMode = 'GrowAndShrink'; $destPanel.FlowDirection = 'LeftToRight'; $destPanel.WrapContents = $false
-        $destPanel.Margin = New-Object System.Windows.Forms.Padding(4, 6, 18, 2); $destPanel.Padding = New-Object System.Windows.Forms.Padding(4, 2, 4, 2)
-        $destLbl = New-Object System.Windows.Forms.Label; $destLbl.Text = 'Create in:'; $destLbl.AutoSize = $true; $destLbl.Font = $t.FontBold; $destLbl.Margin = New-Object System.Windows.Forms.Padding(2, 6, 10, 3)
-        $destCloud = New-Object System.Windows.Forms.RadioButton; $destCloud.Text = 'Entra &cloud'; $destCloud.AutoSize = $true; $destCloud.Checked = $true; $destCloud.Margin = New-Object System.Windows.Forms.Padding(3, 5, 10, 3)
-        $destOnPrem = New-Object System.Windows.Forms.RadioButton; $destOnPrem.Text = 'On-&premises AD'; $destOnPrem.AutoSize = $true; $destOnPrem.Margin = New-Object System.Windows.Forms.Padding(3, 5, 8, 3)
-        $destPanel.Controls.AddRange(@($destLbl, $destCloud, $destOnPrem))
+        $destLbl = New-Object System.Windows.Forms.Label; $destLbl.Text = 'Create in:'; $destLbl.AutoSize = $true; $destLbl.Font = $t.FontBold; $destLbl.Margin = New-Object System.Windows.Forms.Padding(4, 11, 6, 3)
+        $destCombo = New-Object System.Windows.Forms.ComboBox
+        $destCombo.DropDownStyle = 'DropDownList'; $destCombo.Width = 150; $destCombo.Margin = New-Object System.Windows.Forms.Padding(0, 8, 12, 3)
+        [void]$destCombo.Items.AddRange(@('Entra cloud', 'On-premises AD')); $destCombo.SelectedIndex = 0
     }
     $selectBtn = New-Object System.Windows.Forms.Button; $selectBtn.Text = "&Select $entityWord..."; $selectBtn.Width = 130; $selectBtn.Height = $t.BtnH; $selectBtn.Visible = $false; $selectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 7, 8, 3)
     Set-SecondaryButtonStyle $selectBtn
     $targetLabel = New-Object System.Windows.Forms.Label; $targetLabel.AutoSize = $true; $targetLabel.Margin = New-Object System.Windows.Forms.Padding(3, 10, 3, 3); $targetLabel.ForeColor = $t.Muted; $targetLabel.Visible = $false
     if ($Tab -eq 'User') {
-        $left.Controls.AddRange(@($modeNew, $modeEdit, $typePanel, $selectBtn, $targetLabel))
+        $left.Controls.AddRange(@($modePanel, $typeCombo, $destLbl, $destCombo, $selectBtn, $targetLabel))
     } else {
-        $left.Controls.AddRange(@($modeNew, $modeEdit, $selectBtn, $targetLabel))
+        $left.Controls.AddRange(@($modePanel, $selectBtn, $targetLabel))
     }
 
     # Verb-led, outcome-describing label (not the opaque "Fields...") + a tooltip spelling out what it does.
@@ -388,10 +391,9 @@ function New-EntityTab {
     $formHost = New-Object System.Windows.Forms.TableLayoutPanel
     $formHost.Dock = 'Top'; $formHost.AutoSize = $true; $formHost.AutoSizeMode = 'GrowAndShrink'; $formHost.ColumnCount = 1; $formHost.RowCount = 3
     [void]$formHost.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-    [void]$formHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))   # destination toggle
+    [void]$formHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))   # (was destination toggle; now in header -- row left empty, collapses to 0)
     [void]$formHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))   # OU picker
     [void]$formHost.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))   # field grid
-    if ($destPanel) { $formHost.Controls.Add($destPanel, 0, 0) }   # visible by default (New + Member); hidden for Guest/Edit
 
     # OU picker (User tab only) -- shown only for an on-prem create; populated from the writable DC.
     $ouPanel = $null; $ouCombo = $null
@@ -509,9 +511,9 @@ function New-EntityTab {
         Fields = @{}; Order = (New-Object System.Collections.Generic.List[object])
         SaveBtn = $saveBtn; ResetBtn = $resetBtn; DeleteBtn = $deleteBtn; SettingsBtn = $settingsBtn
         BackupBtn = $backupBtn; RestoreBtn = $restoreBtn
-        TypePanel = $typePanel; TypeMember = $typeMember; TypeGuest = $typeGuest
+        TypeCombo = $typeCombo
         GuestBox = $guestBox; GuestEmail = $gEmail; GuestName = $gName; GuestSend = $gSend; GuestUrl = $gUrl
-        DestPanel = $destPanel; DestCloud = $destCloud; DestOnPrem = $destOnPrem
+        DestLbl = $destLbl; DestCombo = $destCombo; OnPremEnabled = $false; DestSuppress = $false
         OuPanel = $ouPanel; OuCombo = $ouCombo
         CurrentKind = 'Security'   # Group tab: which kind's view is showing (driven by the GroupType radio / loaded group)
     }
@@ -541,10 +543,25 @@ function New-EntityTab {
     $resetBtn.Add_Click({ param($s, $e) Set-TabMode -Tab $s.Tag -Mode $script:UI[$s.Tag].Mode })
     $deleteBtn.Add_Click({ param($s, $e) Invoke-Delete -Tab $s.Tag })
     if ($Tab -eq 'User') {
-        $typeMember.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserAccountType -Type 'Member' } })
-        $typeGuest.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserAccountType -Type 'Guest' } })
-        $destCloud.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserCreateDestination -Destination 'Cloud' } })
-        $destOnPrem.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-UserCreateDestination -Destination 'OnPrem' } })
+        $typeCombo.Add_SelectedIndexChanged({
+            param($s, $e)
+            if ($s.SelectedIndex -lt 0) { return }
+            if ("$($s.SelectedItem)" -match '^Guest') { Set-UserAccountType -Type 'Guest' } else { Set-UserAccountType -Type 'Member' }
+        })
+        # On-prem isn't a real combo item we can disable, so bounce a pick of it back to Cloud when on-prem
+        # isn't connected ($ctx.OnPremEnabled). $ctx.DestSuppress guards the programmatic re-selects below +
+        # in Set-UserCreateDestination's Cloud-fallback from re-entering this handler.
+        $destCombo.Add_SelectedIndexChanged({
+            param($s, $e)
+            $ctx = $script:UI.User
+            if ($ctx.DestSuppress) { return }
+            if ($s.SelectedIndex -lt 0) { return }
+            if ($s.SelectedIndex -eq 1 -and -not $ctx.OnPremEnabled) {
+                $ctx.DestSuppress = $true; $s.SelectedIndex = 0; $ctx.DestSuppress = $false
+                Set-UserCreateDestination -Destination 'Cloud'; return
+            }
+            if ($s.SelectedIndex -eq 1) { Set-UserCreateDestination -Destination 'OnPrem' } else { Set-UserCreateDestination -Destination 'Cloud' }
+        })
     }
 
     Build-TabForm -Tab $Tab
@@ -753,14 +770,14 @@ function Set-UserAccountType {
     # has no create destination (showing it there is wrong; Set-TabMode hides it but used to call us right
     # after, which re-showed it). Gate on New mode so Edit never displays the destination row.
     $showDest = (-not $isGuest) -and ($ctx.Mode -eq 'New')
-    if ($ctx.DestPanel) { $ctx.DestPanel.Visible = $showDest }
+    if ($ctx.DestCombo) { $ctx.DestCombo.Visible = $showDest; if ($ctx.DestLbl) { $ctx.DestLbl.Visible = $showDest } }
     if (-not $showDest -and $ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
     if ($isGuest) {
         $ctx.SaveBtn.Text = '&Send invite'
     } elseif ($showDest) {
-        # Re-apply the destination view (Save text + OU picker + cloud-field gating). Drives off the radio
-        # so a previously-chosen On-prem persists across toggles.
-        Set-UserCreateDestination -Destination $(if ($ctx.DestOnPrem -and $ctx.DestOnPrem.Checked) { 'OnPrem' } else { 'Cloud' })
+        # Re-apply the destination view (Save text + OU picker + cloud-field gating). Drives off the combo
+        # selection so a previously-chosen On-prem persists across Member<->Guest toggles.
+        Set-UserCreateDestination -Destination $(if ($ctx.DestCombo -and $ctx.DestCombo.SelectedIndex -eq 1) { 'OnPrem' } else { 'Cloud' })
     }
     # Edit + Member: leave the Save button text to Build-TabForm ('&Save changes').
 }
@@ -779,7 +796,11 @@ function Initialize-OuPicker {
     if ($def) { [void]$items.Add([pscustomobject]@{ Display = "Users (default container) -- $def"; Dn = $def }) }
     foreach ($ou in (Get-AdOrganizationalUnitList -Dc $cap.Dc)) { [void]$items.Add([pscustomobject]@{ Display = $ou.DistinguishedName; Dn = $ou.DistinguishedName }) }
     if ($items.Count -eq 0) {
-        $ctx.DestOnPrem.Enabled = $false; $ctx.DestCloud.Checked = $true
+        # Disable on-prem (sentinel) and bounce the combo back to Cloud (suppressed so the handler doesn't
+        # double-fire), then run the Cloud path explicitly -- mirrors the old DestCloud.Checked = $true.
+        $ctx.OnPremEnabled = $false
+        $ctx.DestSuppress = $true; $ctx.DestCombo.SelectedIndex = 0; $ctx.DestSuppress = $false
+        Set-UserCreateDestination -Destination 'Cloud'
         [System.Windows.Forms.MessageBox]::Show('No organizational units could be read from Active Directory, so an on-prem create is not available right now.', 'On-premises AD', 'OK', 'Warning') | Out-Null
         return
     }
@@ -819,13 +840,13 @@ function Set-UserCreateDestination {
     #>
     param([ValidateSet('Cloud', 'OnPrem')][string]$Destination)
     $ctx = $script:UI.User
-    if (-not $ctx -or -not $ctx.DestPanel) { return }
+    if (-not $ctx -or -not $ctx.DestCombo) { return }
 
     if ($Destination -eq 'Cloud') {
         $connected = [bool](Test-GraphConnected)
-        $ctx.DestOnPrem.Enabled = $connected     # clickable when connected; the AD check runs on selection
-        $script:UI.Tooltip.SetToolTip($ctx.DestOnPrem,
-            $(if ($connected) { 'Create the user in on-premises AD instead -- availability is checked when you select this.' }
+        $ctx.OnPremEnabled = $connected         # sentinel: a ComboBox can't disable one item, so the handler bounces an on-prem pick back to Cloud when this is false
+        $script:UI.Tooltip.SetToolTip($ctx.DestCombo,
+            $(if ($connected) { 'Member: a normal account. Create in: Entra cloud, or on-premises AD (availability is checked when you select it).' }
               else { 'Connect first to create an on-premises user.' }))
         $ctx.CurrentDest = 'Cloud'
         if ($ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
@@ -841,7 +862,9 @@ function Set-UserCreateDestination {
     }
     Update-OnPremUi   # reflect the probe result in the sidebar on-prem row
     if (-not ($cap -and $cap.Available)) {
-        $ctx.DestCloud.Checked = $true           # CheckedChanged re-enters as Cloud (the cheap path)
+        # Bounce the combo back to Cloud (suppressed) + run the cheap Cloud path -- was DestCloud.Checked = $true.
+        $ctx.DestSuppress = $true; $ctx.DestCombo.SelectedIndex = 0; $ctx.DestSuppress = $false
+        Set-UserCreateDestination -Destination 'Cloud'
         [System.Windows.Forms.MessageBox]::Show(
             ("On-premises Active Directory isn't available from this workstation right now:`n`n" +
              "$(if ($cap) { $cap.Reason } else { 'Unknown error.' })`n`nThe user will be created in the cloud instead."),
@@ -922,14 +945,16 @@ function Set-TabMode {
     if ($Tab -eq 'User') { $script:State.SelectedUser = $null } else { $script:State.SelectedGroup = $null }
     # Member/Guest + Create-in (cloud/on-prem) only apply to creating a User; show them in New mode, and
     # always return to Member + Cloud on a mode switch (create-destination is a create-time concept).
-    if ($Tab -eq 'User' -and $ctx.TypePanel) {
-        $ctx.TypePanel.Visible = ($Mode -eq 'New')
-        if ($ctx.DestPanel) {
-            $ctx.DestPanel.Visible = ($Mode -eq 'New')
-            if ($ctx.DestCloud) { $ctx.DestCloud.Checked = $true }
+    if ($Tab -eq 'User' -and $ctx.TypeCombo) {
+        $ctx.TypeCombo.Visible = ($Mode -eq 'New')
+        if ($ctx.DestCombo) {
+            $ctx.DestCombo.Visible = ($Mode -eq 'New')
+            if ($ctx.DestLbl) { $ctx.DestLbl.Visible = ($Mode -eq 'New') }
+            # Reset to Cloud (suppressed -- the explicit Set-UserAccountType below re-drives the view).
+            $ctx.DestSuppress = $true; $ctx.DestCombo.SelectedIndex = 0; $ctx.DestSuppress = $false
             if ($ctx.OuPanel) { $ctx.OuPanel.Visible = $false }
         }
-        $ctx.TypeMember.Checked = $true
+        $ctx.TypeCombo.SelectedIndex = 0
         Set-UserAccountType -Type 'Member'
     }
     $script:UI.ErrorProvider.Clear()
@@ -1163,9 +1188,9 @@ function Complete-Connection {
         foreach ($tab in 'User', 'Group') { Build-TabForm -Tab $tab }
         # Now connected: let the On-prem create option be selected (the slow AD availability check still
         # defers until it's actually picked, so connecting stays fast for the cloud-only common case).
-        if ($script:UI.User -and $script:UI.User.DestOnPrem) {
-            $script:UI.User.DestOnPrem.Enabled = $true
-            $script:UI.Tooltip.SetToolTip($script:UI.User.DestOnPrem, 'Create the user in on-premises AD instead -- availability is checked when you select this.')
+        if ($script:UI.User -and $script:UI.User.DestCombo) {
+            $script:UI.User.OnPremEnabled = $true   # sentinel: on-prem pick is now allowed (AD check still defers to selection)
+            $script:UI.Tooltip.SetToolTip($script:UI.User.DestCombo, 'Member: a normal account. Create in: Entra cloud, or on-premises AD (availability is checked when you select it).')
         }
     }
     $missing = Get-MissingScopes
@@ -1625,7 +1650,7 @@ function Invoke-Save {
     param([ValidateSet('User', 'Group')][string]$Tab)
     if (-not (Test-GraphConnected)) { [System.Windows.Forms.MessageBox]::Show('Connect first.', 'Not connected', 'OK', 'Information') | Out-Null; return }
     $ctx = $script:UI[$Tab]
-    $guestMode = ($Tab -eq 'User' -and $ctx.Mode -eq 'New' -and $ctx.TypeGuest -and $ctx.TypeGuest.Checked)
+    $guestMode = ($Tab -eq 'User' -and $ctx.Mode -eq 'New' -and $ctx.TypeCombo -and "$($ctx.TypeCombo.SelectedItem)" -match '^Guest')
     if (-not $guestMode -and -not (Test-FormValid -Tab $Tab)) { return }
     Set-UiBusy $true
     try {
@@ -1753,7 +1778,7 @@ function Invoke-SaveUser {
 
     # On-prem create routes to AD BEFORE the cloud license/usageLocation guard below -- those fields are
     # hidden (and irrelevant) for an on-prem create, and the guard reads them visibility-independently.
-    if ($mode -eq 'New' -and $ctx.DestOnPrem -and $ctx.DestOnPrem.Checked) {
+    if ($mode -eq 'New' -and $ctx.DestCombo -and $ctx.DestCombo.SelectedIndex -eq 1) {
         Invoke-CreateUserInAd
         return
     }

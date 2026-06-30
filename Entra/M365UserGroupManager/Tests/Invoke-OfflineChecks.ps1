@@ -578,7 +578,7 @@ Assert-That 'main form builds headless, including the guest-invite panel + handl
         $script:AppReady = $false
         $script:Config = New-DefaultConfig
         $form = New-MainForm
-        $ok = $script:UI.User.GuestBox -and $script:UI.User.TypeMember -and $script:UI.User.TypeGuest -and `
+        $ok = $script:UI.User.GuestBox -and $script:UI.User.TypeCombo -and ($script:UI.User.TypeCombo.Items.Count -eq 2) -and `
               $script:UI.User.GuestEmail -and $script:UI.User.GuestUrl -and $script:UI.User.GuestSend
         $form.Dispose()
         [bool]$ok
@@ -589,17 +589,16 @@ Assert-That 'guest invite wired: User.Invite.All scope + Send-GuestInvitation pr
         ($script:GraphScopes -contains 'User.Invite.All') -and [bool](Get-Command Send-GuestInvitation -ErrorAction SilentlyContinue)
     }
 }
-Assert-That 'New/Edit and Member/Guest are INDEPENDENT radio groups (Guest does not deselect New)' {
+Assert-That 'Mode (New/Edit radios) and account-type (combo) are independent (selecting Guest does not change mode)' {
     & $mod {
         $script:AppReady = $false; $script:Config = New-DefaultConfig
         $form = New-MainForm
         $u = $script:UI.User
-        $u.TypeGuest.Checked = $true
-        $ok = ($u.ModeNew.Checked) -and ($u.TypeGuest.Checked) -and (-not $u.ModeEdit.Checked) -and (-not $u.TypeMember.Checked)
-        # and the panel really is a separate parent (not $left), so grouping is independent
-        $sep = ($u.TypeMember.Parent -ne $u.ModeNew.Parent)
+        $u.TypeCombo.SelectedIndex = 1   # Guest
+        # Mode is a radio, type is a combo -- inherently independent. New stays selected.
+        $ok = ($u.ModeNew.Checked) -and (-not $u.ModeEdit.Checked) -and ("$($u.TypeCombo.SelectedItem)" -match '^Guest')
         $form.Dispose()
-        $ok -and $sep
+        $ok
     }
 }
 
@@ -947,10 +946,10 @@ Assert-That 'sidebar nav hosts Users, Groups, Exchange, Devices and Approvals pa
         ($script:UI.NavButtons['Approval'].Tag -eq 'Approval')
     }
 }
-Assert-That 'User New form has the Create-in (cloud/on-prem) toggle + OU picker controls (cloud default)' {
+Assert-That 'User New form has the Create-in (cloud/on-prem) dropdown + OU picker controls (cloud default)' {
     & $mod {
         $u = $script:UI.User
-        [bool]$u.DestPanel -and [bool]$u.DestCloud -and [bool]$u.DestOnPrem -and [bool]$u.OuPanel -and [bool]$u.OuCombo -and $u.DestCloud.Checked
+        [bool]$u.DestCombo -and ($u.DestCombo.Items.Count -eq 2) -and ($u.DestCombo.SelectedIndex -eq 0) -and [bool]$u.OuPanel -and [bool]$u.OuCombo
     }
 }
 Assert-That 'Edit mode does NOT run the create-destination view (Create-in row is New-only)' {
