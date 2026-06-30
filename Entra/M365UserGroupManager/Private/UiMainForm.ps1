@@ -540,28 +540,29 @@ function New-EntityTab {
         $layout.Controls.Add($guestBox, 0, 1)
     }
 
-    # --- Actions: Save / Reset (left), Delete (right) --------------------------------------
+    # --- Actions: one primary (Save/Create) + Reset, with Backup / Restore / Delete tucked behind a "More"
+    #     overflow so the footer leads with a single clear primary. The menu items are stashed under the
+    #     SAME BackupBtn/RestoreBtn/DeleteBtn keys, so Set-TabActionState / Set-TabMode / Set-UserAccountType
+    #     drive their .Enabled/.Visible unchanged. Delete keeps a red text cue + the typed-confirm in Invoke-Delete.
     $actions = New-Object System.Windows.Forms.TableLayoutPanel
-    $actions.Dock = 'Fill'; $actions.ColumnCount = 2; $actions.RowCount = 1
+    $actions.Dock = 'Fill'; $actions.ColumnCount = 1; $actions.RowCount = 1
     [void]$actions.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-    [void]$actions.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
-    $leftActions = New-Object System.Windows.Forms.FlowLayoutPanel; $leftActions.Dock = 'Fill'; $leftActions.FlowDirection = 'LeftToRight'; $leftActions.WrapContents = $false
+    $leftActions = New-Object System.Windows.Forms.FlowLayoutPanel; $leftActions.Dock = 'Fill'; $leftActions.FlowDirection = 'LeftToRight'; $leftActions.WrapContents = $false; $leftActions.AutoSize = $true
     # The single primary action is the dominant control: accent fill + widest + a heavier font (so its
-    # prominence survives grayscale / colour-blindness, not fill-colour alone). Secondaries share the
-    # row height token; the primary stands out on the other three channels.
+    # prominence survives grayscale / colour-blindness, not fill-colour alone).
     $saveBtn = New-Object System.Windows.Forms.Button; $saveBtn.Text = "&Create $entityWord"; $saveBtn.Width = 150; $saveBtn.Height = $t.BtnHPrimary; $saveBtn.Font = $t.FontLarge; $saveBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 6)
     Set-PrimaryButtonStyle $saveBtn
     $resetBtn = New-Object System.Windows.Forms.Button; $resetBtn.Text = '&Reset'; $resetBtn.Width = 84; $resetBtn.Height = $t.BtnHPrimary; $resetBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
     Set-SecondaryButtonStyle $resetBtn
-    $backupBtn = New-Object System.Windows.Forms.Button; $backupBtn.Text = '&Backup...'; $backupBtn.Width = 90; $backupBtn.Height = $t.BtnHPrimary; $backupBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 6, 3, 6); $backupBtn.Enabled = $false
-    $restoreBtn = New-Object System.Windows.Forms.Button; $restoreBtn.Text = 'Res&tore...'; $restoreBtn.Width = 90; $restoreBtn.Height = $t.BtnHPrimary; $restoreBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
-    Set-SecondaryButtonStyle $backupBtn; Set-SecondaryButtonStyle $restoreBtn
-    $leftActions.Controls.AddRange(@($saveBtn, $resetBtn, $backupBtn, $restoreBtn))
-    $rightActions = New-Object System.Windows.Forms.FlowLayoutPanel; $rightActions.Dock = 'Fill'; $rightActions.FlowDirection = 'RightToLeft'; $rightActions.WrapContents = $false
-    $deleteBtn = New-Object System.Windows.Forms.Button; $deleteBtn.Text = "&Delete $entityWord"; $deleteBtn.Width = 130; $deleteBtn.Height = $t.BtnHPrimary; $deleteBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6); $deleteBtn.Visible = $false
-    Set-DangerButtonStyle $deleteBtn   # red border (affordance survives grayscale), not red text alone
-    $rightActions.Controls.Add($deleteBtn)
-    $actions.Controls.Add($leftActions, 0, 0); $actions.Controls.Add($rightActions, 1, 0)
+    $moreBtn = New-Object System.Windows.Forms.Button; $moreBtn.Text = "$([char]0x22EF) &More"; $moreBtn.Width = 96; $moreBtn.Height = $t.BtnHPrimary; $moreBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 6, 3, 6)
+    Set-SecondaryButtonStyle $moreBtn
+    $moreMenu = New-Object System.Windows.Forms.ContextMenuStrip; $moreMenu.BackColor = $t.Surface; $moreMenu.ForeColor = $t.Text; $moreMenu.ShowImageMargin = $false
+    $backupBtn = $moreMenu.Items.Add('&Backup...'); $backupBtn.Enabled = $false
+    $restoreBtn = $moreMenu.Items.Add('Res&tore...')
+    [void]$moreMenu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+    $deleteBtn = $moreMenu.Items.Add("&Delete $entityWord..."); $deleteBtn.ForeColor = $t.ErrText; $deleteBtn.Visible = $false
+    $leftActions.Controls.AddRange(@($saveBtn, $resetBtn, $moreBtn))
+    $actions.Controls.Add($leftActions, 0, 0)
     $layout.Controls.Add($actions, 0, 2)
 
     # --- Disconnected empty-state -----------------------------------------------------------
@@ -582,7 +583,7 @@ function New-EntityTab {
         ScrollHost = $scroll; FormTlp = $formTlp
         Fields = @{}; Order = (New-Object System.Collections.Generic.List[object])
         SaveBtn = $saveBtn; ResetBtn = $resetBtn; DeleteBtn = $deleteBtn; SettingsBtn = $settingsBtn
-        BackupBtn = $backupBtn; RestoreBtn = $restoreBtn
+        BackupBtn = $backupBtn; RestoreBtn = $restoreBtn; MoreBtn = $moreBtn; MoreMenu = $moreMenu
         TypeCombo = $typeCombo
         GuestBox = $guestBox; GuestEmail = $gEmail; GuestName = $gName; GuestSend = $gSend; GuestUrl = $gUrl
         DestLbl = $destLbl; DestCombo = $destCombo; OnPremEnabled = $false; DestSuppress = $false
@@ -593,7 +594,8 @@ function New-EntityTab {
     # --- Wire tab events -------------------------------------------------------------------
     $modeNew.Tag = $Tab; $modeEdit.Tag = $Tab; $selectBtn.Tag = $Tab
     $saveBtn.Tag = $Tab; $resetBtn.Tag = $Tab; $deleteBtn.Tag = $Tab; $settingsBtn.Tag = $Tab
-    $backupBtn.Tag = $Tab
+    $backupBtn.Tag = $Tab; $moreBtn.Tag = $Tab
+    $moreBtn.Add_Click({ param($s, $e) $script:UI[$s.Tag].MoreMenu.Show($s, 0, $s.Height) })
     $backupBtn.Add_Click({ param($s, $e) Invoke-Backup -Tab $s.Tag })
     $restoreBtn.Add_Click({ Invoke-Restore })
     $modeNew.Add_CheckedChanged({ param($s, $e) if ($s.Checked) { Set-TabMode -Tab $s.Tag -Mode 'New' } })

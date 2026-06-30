@@ -1015,6 +1015,18 @@ Assert-That 'sidebar selection shows the page + points Enter at its primary (Sel
         $grpOk -and $usrOk
     }
 }
+Assert-That 'action footer: Backup/Restore/Delete live in a More overflow menu; Delete toggles with Edit' {
+    & $mod {
+        $u = $script:UI.User
+        $menuOk = [bool]$u.MoreMenu -and [bool]$u.MoreBtn -and ($u.MoreMenu.Items.Count -eq 4)   # Backup, Restore, separator, Delete
+        $itemsOk = ($u.DeleteBtn -is [System.Windows.Forms.ToolStripMenuItem]) -and ($u.BackupBtn -is [System.Windows.Forms.ToolStripMenuItem])
+        # Save stays a real Button (AcceptButton targets it); Delete's availability follows the mode.
+        $saveOk = ($u.SaveBtn -is [System.Windows.Forms.Button])
+        Set-TabMode -Tab 'User' -Mode 'Edit'; $delShown = $u.DeleteBtn.Available
+        Set-TabMode -Tab 'User' -Mode 'New';  $delHidden = -not $u.DeleteBtn.Available
+        $menuOk -and $itemsOk -and $saveOk -and $delShown -and $delHidden
+    }
+}
 Assert-That 'Sync-ConnectionUi reflects a disconnected attempt (clears selection, label shows Not connected)' {
     & $mod {
         $script:State = @{ SelectedUser = @{ id = 'x' }; SelectedGroup = $null }
