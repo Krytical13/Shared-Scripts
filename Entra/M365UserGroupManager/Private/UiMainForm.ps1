@@ -63,12 +63,17 @@ function New-MainForm {
     $navDevice = New-NavItem -Key 'Device'   -Text 'Devices'  -Glyph ([char]0xE977)   # Devices
     $navApprov = New-NavItem -Key 'Approval' -Text 'Approvals' -Glyph ([char]0xE73E)  # CheckMark
 
-    # Connection block, pinned to the sidebar bottom.
+    # Connection block, pinned to the sidebar bottom. A "CONNECTION" caption frames it (mirrors MAIN); the
+    # on-prem trio is indented to read as sitting UNDER the cloud sign-in; and Settings is detached at the
+    # very bottom by a thin separator because it's app config, not a connection action.
     $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
     $connPanel.Dock = 'Fill'; $connPanel.AutoSize = $true; $connPanel.AutoSizeMode = 'GrowAndShrink'
-    $connPanel.ColumnCount = 1; $connPanel.RowCount = 7; $connPanel.BackColor = $t.NavBg
+    $connPanel.ColumnCount = 1; $connPanel.RowCount = 9; $connPanel.BackColor = $t.NavBg
     $connPanel.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 14)
     [void]$connPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    $connCap = New-Object System.Windows.Forms.Label
+    $connCap.Text = 'CONNECTION'; $connCap.AutoSize = $true; $connCap.ForeColor = $t.Muted; $connCap.Font = $t.FontNavHdr
+    $connCap.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 4)
     $connLabel = New-Object System.Windows.Forms.Label
     $connLabel.Text = "$([char]0x25CB) Not connected"; $connLabel.AutoSize = $true; $connLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 28), 0)
     $connLabel.Font = $t.FontBase; $connLabel.ForeColor = $t.ErrText; $connLabel.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 8)
@@ -79,20 +84,25 @@ function New-MainForm {
     # On-prem AD connection -- a SEPARATE connect from the cloud sign-in (the on-prem network is reached by
     # VPN / LAN / RDP, independent of which tenant you're signed into). The label is the second line of the
     # connection banner; both row + button are hidden until the tenant is known hybrid (Update-OnPremUi).
+    # Indented left ($t.GapLg) so the trio reads as nested under the cloud sign-in above.
     $onpremLabel = New-Object System.Windows.Forms.Label
     $onpremLabel.Text = ''; $onpremLabel.AutoSize = $true; $onpremLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 28), 0)
-    $onpremLabel.Font = $t.FontBase; $onpremLabel.ForeColor = $t.Muted; $onpremLabel.Margin = New-Object System.Windows.Forms.Padding(3, 10, 3, 6); $onpremLabel.Visible = $false
+    $onpremLabel.Font = $t.FontBase; $onpremLabel.ForeColor = $t.Muted; $onpremLabel.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 10, 3, 6); $onpremLabel.Visible = $false
     $onpremBtn = New-Object System.Windows.Forms.Button
-    $onpremBtn.Text = 'Connect on-&prem AD'; $onpremBtn.Dock = 'Fill'; $onpremBtn.Height = $t.BtnH; $onpremBtn.Visible = $false; $onpremBtn.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 0)
+    $onpremBtn.Text = 'Connect on-&prem AD'; $onpremBtn.Dock = 'Fill'; $onpremBtn.Height = $t.BtnH; $onpremBtn.Visible = $false; $onpremBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 0, 3, 0)
     # Force a directory sync (hybrid tenants only) -- shown by Update-SyncButtonState when synced.
     $syncBtn = New-Object System.Windows.Forms.Button
-    $syncBtn.Text = 'Force AD &sync'; $syncBtn.Dock = 'Fill'; $syncBtn.Height = $t.BtnH; $syncBtn.Visible = $false; $syncBtn.Margin = New-Object System.Windows.Forms.Padding(3, 8, 3, 0)
+    $syncBtn.Text = 'Force AD &sync'; $syncBtn.Dock = 'Fill'; $syncBtn.Height = $t.BtnH; $syncBtn.Visible = $false; $syncBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 8, 3, 0)
+    # Thin separator detaches Settings from the connection actions above it.
+    $configSep = New-Object System.Windows.Forms.Panel
+    $configSep.Height = 1; $configSep.Dock = 'Fill'; $configSep.BackColor = $t.Border; $configSep.Margin = New-Object System.Windows.Forms.Padding(3, 12, 3, 0)
     # Settings / config (server locations etc.) -- a gear that opens the per-tenant + global config dialog.
     $configBtn = New-Object System.Windows.Forms.Button
-    $configBtn.Text = "$([char]0x2699) &Settings"; $configBtn.Dock = 'Fill'; $configBtn.Height = $t.BtnH; $configBtn.Margin = New-Object System.Windows.Forms.Padding(3, 10, 3, 0)
-    $connPanel.Controls.Add($connLabel, 0, 0); $connPanel.Controls.Add($connectBtn, 0, 1); $connPanel.Controls.Add($disconnectBtn, 0, 2)
-    $connPanel.Controls.Add($onpremLabel, 0, 3); $connPanel.Controls.Add($onpremBtn, 0, 4); $connPanel.Controls.Add($syncBtn, 0, 5)
-    $connPanel.Controls.Add($configBtn, 0, 6)
+    $configBtn.Text = "$([char]0x2699) &Settings"; $configBtn.Dock = 'Fill'; $configBtn.Height = $t.BtnH; $configBtn.Margin = New-Object System.Windows.Forms.Padding(3, 8, 3, 0)
+    $connPanel.Controls.Add($connCap, 0, 0)
+    $connPanel.Controls.Add($connLabel, 0, 1); $connPanel.Controls.Add($connectBtn, 0, 2); $connPanel.Controls.Add($disconnectBtn, 0, 3)
+    $connPanel.Controls.Add($onpremLabel, 0, 4); $connPanel.Controls.Add($onpremBtn, 0, 5); $connPanel.Controls.Add($syncBtn, 0, 6)
+    $connPanel.Controls.Add($configSep, 0, 7); $connPanel.Controls.Add($configBtn, 0, 8)
 
     $nav.Controls.Add($brand, 0, 0); $nav.Controls.Add($cap, 0, 1)
     $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4)
@@ -319,7 +329,9 @@ function New-EntityTab {
     [void]$header.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
 
     $left = New-Object System.Windows.Forms.FlowLayoutPanel
-    $left.Dock = 'Fill'; $left.FlowDirection = 'LeftToRight'; $left.WrapContents = $false
+    # WrapContents so this busy row reflows onto a second line on a narrow window instead of clipping the
+    # trailing controls (e.g. the target label) -- the header host gives it the height it needs.
+    $left.Dock = 'Fill'; $left.FlowDirection = 'LeftToRight'; $left.WrapContents = $true
     $modeNew = New-Object System.Windows.Forms.RadioButton; $modeNew.Text = "&New $entityWord"; $modeNew.AutoSize = $true; $modeNew.Checked = $true; $modeNew.Margin = New-Object System.Windows.Forms.Padding(3, 10, 8, 3)
     $modeEdit = New-Object System.Windows.Forms.RadioButton; $modeEdit.Text = '&Edit existing'; $modeEdit.AutoSize = $true; $modeEdit.Margin = New-Object System.Windows.Forms.Padding(3, 10, 12, 3)
     # Surface the progressive-disclosure model at the point of choice (recognition over recall).
@@ -331,7 +343,9 @@ function New-EntityTab {
     $typePanel = $null; $typeMember = $null; $typeGuest = $null
     if ($Tab -eq 'User') {
         $typePanel = New-Object System.Windows.Forms.FlowLayoutPanel
-        $typePanel.AutoSize = $true; $typePanel.AutoSizeMode = 'GrowAndShrink'; $typePanel.FlowDirection = 'LeftToRight'; $typePanel.WrapContents = $false; $typePanel.Margin = New-Object System.Windows.Forms.Padding(0)
+        $typePanel.AutoSize = $true; $typePanel.AutoSizeMode = 'GrowAndShrink'; $typePanel.FlowDirection = 'LeftToRight'; $typePanel.WrapContents = $false; $typePanel.Margin = New-Object System.Windows.Forms.Padding(0, 4, 0, 4)
+        # Faint tinted card so Member/Guest read as one group distinct from New/Edit (Gestalt > a hairline glyph).
+        $typePanel.BackColor = $t.SurfaceAlt; $typePanel.Padding = New-Object System.Windows.Forms.Padding(4, 0, 6, 0)
         # Visible divider (Muted = 5.4:1, not the near-invisible Border at 1.35:1) so the account-type
         # radios read as a separate group from New/Edit -- a perceivable Gestalt boundary (SC 1.4.11).
         $typeSep = New-Object System.Windows.Forms.Label; $typeSep.Text = '|'; $typeSep.AutoSize = $true; $typeSep.ForeColor = $t.Muted; $typeSep.Margin = New-Object System.Windows.Forms.Padding(2, 10, 6, 3)

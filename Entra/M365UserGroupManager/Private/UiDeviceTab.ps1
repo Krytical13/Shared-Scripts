@@ -62,14 +62,17 @@ function New-DeviceTab {
     Set-SecondaryButtonStyle $findBtn
     $searchRow.Controls.AddRange(@($nameLbl, $nameBox, $findBtn)); [void]$stack.Controls.Add($searchRow)
 
-    # Per-store status grid: store name | status | include checkbox.
-    $grid = New-Object System.Windows.Forms.TableLayoutPanel; $grid.AutoSize = $true; $grid.AutoSizeMode = 'GrowAndShrink'; $grid.ColumnCount = 3; $grid.RowCount = $script:DeviceStoreDefs.Count; $grid.Margin = New-Object System.Windows.Forms.Padding(4, 2, 4, 8)
+    # Per-store status grid: store name | status | include checkbox -- with a muted header row so the bare
+    # "remove" checkbox column is self-describing (a first-time tech shouldn't have to infer it).
+    $grid = New-Object System.Windows.Forms.TableLayoutPanel; $grid.AutoSize = $true; $grid.AutoSizeMode = 'GrowAndShrink'; $grid.ColumnCount = 3; $grid.RowCount = ($script:DeviceStoreDefs.Count + 1); $grid.Margin = New-Object System.Windows.Forms.Padding(4, 2, 4, 8)
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 190)))
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Absolute, 440)))
     [void]$grid.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
+    $mkHdr = { param($txt) $h = New-Object System.Windows.Forms.Label; $h.Text = $txt; $h.AutoSize = $true; $h.ForeColor = $t.Muted; $h.Font = $t.FontNavHdr; $h.Anchor = 'Left'; $h.Margin = New-Object System.Windows.Forms.Padding(3, 4, 8, 6); $h }
+    $grid.Controls.Add((& $mkHdr 'STORE'), 0, 0); $grid.Controls.Add((& $mkHdr 'STATUS'), 1, 0); $grid.Controls.Add((& $mkHdr 'REMOVE?'), 2, 0)
     $defaults = @($script:Config.DeviceCleanupTargets)
     $stores = @{}
-    $r = 0
+    $r = 1
     foreach ($s in $script:DeviceStoreDefs) {
         $lbl = New-Object System.Windows.Forms.Label; $lbl.Text = $s.Label; $lbl.AutoSize = $true; $lbl.Font = $t.FontBold; $lbl.Anchor = 'Left'; $lbl.Margin = New-Object System.Windows.Forms.Padding(3, 7, 8, 5)
         $stat = New-Object System.Windows.Forms.Label; $stat.Text = "$([char]0x2014)"; $stat.AutoSize = $true; $stat.ForeColor = $t.Muted; $stat.Anchor = 'Left'; $stat.MaximumSize = New-Object System.Drawing.Size(440, 0); $stat.Margin = New-Object System.Windows.Forms.Padding(3, 7, 8, 5)

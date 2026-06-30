@@ -96,17 +96,19 @@ function New-ExchangeTab {
     [void]$actions.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     [void]$actions.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::AutoSize)))
     $leftActions = New-Object System.Windows.Forms.FlowLayoutPanel; $leftActions.Dock = 'Fill'; $leftActions.FlowDirection = 'LeftToRight'; $leftActions.WrapContents = $false
-    $saveBtn = New-Object System.Windows.Forms.Button; $saveBtn.Text = '&Create'; $saveBtn.Width = 150; $saveBtn.Height = 34; $saveBtn.Font = $t.FontMedium; $saveBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 6)
+    $saveBtn = New-Object System.Windows.Forms.Button; $saveBtn.Text = '&Create'; $saveBtn.Width = 150; $saveBtn.Height = $t.BtnHPrimary; $saveBtn.Font = $t.FontMedium; $saveBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 8, 6)
     Set-PrimaryButtonStyle $saveBtn
-    $resetBtn = New-Object System.Windows.Forms.Button; $resetBtn.Text = '&Reset'; $resetBtn.Width = 84; $resetBtn.Height = 34; $resetBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
+    $resetBtn = New-Object System.Windows.Forms.Button; $resetBtn.Text = '&Reset'; $resetBtn.Width = 84; $resetBtn.Height = $t.BtnH; $resetBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
     Set-SecondaryButtonStyle $resetBtn
-    $backupBtn = New-Object System.Windows.Forms.Button; $backupBtn.Text = '&Backup...'; $backupBtn.Width = 90; $backupBtn.Height = 34; $backupBtn.Margin = New-Object System.Windows.Forms.Padding(16, 6, 3, 6); $backupBtn.Enabled = $false
-    $restoreBtn = New-Object System.Windows.Forms.Button; $restoreBtn.Text = 'Res&tore...'; $restoreBtn.Width = 90; $restoreBtn.Height = 34; $restoreBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
+    $backupBtn = New-Object System.Windows.Forms.Button; $backupBtn.Text = '&Backup...'; $backupBtn.Width = 90; $backupBtn.Height = $t.BtnH; $backupBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 6, 3, 6); $backupBtn.Enabled = $false
+    $restoreBtn = New-Object System.Windows.Forms.Button; $restoreBtn.Text = 'Res&tore...'; $restoreBtn.Width = 90; $restoreBtn.Height = $t.BtnH; $restoreBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6)
     Set-SecondaryButtonStyle $backupBtn; Set-SecondaryButtonStyle $restoreBtn
     $leftActions.Controls.AddRange(@($saveBtn, $resetBtn, $backupBtn, $restoreBtn))
     $rightActions = New-Object System.Windows.Forms.FlowLayoutPanel; $rightActions.Dock = 'Fill'; $rightActions.FlowDirection = 'RightToLeft'; $rightActions.WrapContents = $false
-    $deleteBtn = New-Object System.Windows.Forms.Button; $deleteBtn.Text = '&Delete'; $deleteBtn.Width = 130; $deleteBtn.Height = 34; $deleteBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6); $deleteBtn.Visible = $false
-    Set-SecondaryButtonStyle $deleteBtn; $deleteBtn.ForeColor = $t.ErrText
+    $deleteBtn = New-Object System.Windows.Forms.Button; $deleteBtn.Text = '&Delete'; $deleteBtn.Width = 130; $deleteBtn.Height = $t.BtnH; $deleteBtn.Margin = New-Object System.Windows.Forms.Padding(3, 6, 3, 6); $deleteBtn.Visible = $false
+    # Danger style (red border that survives a grayscale/colour-blind pass) -- matches the Users/Groups +
+    # Devices destructive buttons, instead of a secondary button with hand-tinted red text.
+    Set-DangerButtonStyle $deleteBtn
     $rightActions.Controls.Add($deleteBtn)
     $actions.Controls.Add($leftActions, 0, 0); $actions.Controls.Add($rightActions, 1, 0)
     $manage.Controls.Add($actions, 0, 3)
