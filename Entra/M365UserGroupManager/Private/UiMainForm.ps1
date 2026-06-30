@@ -64,7 +64,7 @@ function New-MainForm {
     # Connection block, pinned to the sidebar bottom.
     $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
     $connPanel.Dock = 'Fill'; $connPanel.AutoSize = $true; $connPanel.AutoSizeMode = 'GrowAndShrink'
-    $connPanel.ColumnCount = 1; $connPanel.RowCount = 6; $connPanel.BackColor = $t.NavBg
+    $connPanel.ColumnCount = 1; $connPanel.RowCount = 7; $connPanel.BackColor = $t.NavBg
     $connPanel.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 14)
     [void]$connPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $connLabel = New-Object System.Windows.Forms.Label
@@ -85,8 +85,12 @@ function New-MainForm {
     # Force a directory sync (hybrid tenants only) -- shown by Update-SyncButtonState when synced.
     $syncBtn = New-Object System.Windows.Forms.Button
     $syncBtn.Text = 'Force AD &sync'; $syncBtn.Dock = 'Fill'; $syncBtn.Height = $t.BtnH; $syncBtn.Visible = $false; $syncBtn.Margin = New-Object System.Windows.Forms.Padding(3, 8, 3, 0)
+    # Settings / config (server locations etc.) -- a gear that opens the per-tenant + global config dialog.
+    $configBtn = New-Object System.Windows.Forms.Button
+    $configBtn.Text = "$([char]0x2699) &Settings"; $configBtn.Dock = 'Fill'; $configBtn.Height = $t.BtnH; $configBtn.Margin = New-Object System.Windows.Forms.Padding(3, 10, 3, 0)
     $connPanel.Controls.Add($connLabel, 0, 0); $connPanel.Controls.Add($connectBtn, 0, 1); $connPanel.Controls.Add($disconnectBtn, 0, 2)
     $connPanel.Controls.Add($onpremLabel, 0, 3); $connPanel.Controls.Add($onpremBtn, 0, 4); $connPanel.Controls.Add($syncBtn, 0, 5)
+    $connPanel.Controls.Add($configBtn, 0, 6)
 
     $nav.Controls.Add($brand, 0, 0); $nav.Controls.Add($cap, 0, 1)
     $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4)
@@ -130,7 +134,7 @@ function New-MainForm {
     $script:UI = @{
         Form = $form; Tooltip = $tooltip; ErrorProvider = $errorProvider
         ConnectBtn = $connectBtn; DisconnectBtn = $disconnectBtn; SyncBtn = $syncBtn
-        OnPremBtn = $onpremBtn; OnPremLabel = $onpremLabel
+        OnPremBtn = $onpremBtn; OnPremLabel = $onpremLabel; ConfigBtn = $configBtn
         ConnLabel = $connLabel; Status = $status; Progress = $progress
         NavPanel = $nav; PageHost = $pageHost; HeaderTitle = $hdrTitle; CurrentPage = 'User'
         NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button }
@@ -155,6 +159,8 @@ function New-MainForm {
     Set-SecondaryButtonStyle $disconnectBtn
     Set-SecondaryButtonStyle $onpremBtn
     Set-SecondaryButtonStyle $syncBtn
+    Set-SecondaryButtonStyle $configBtn
+    $configBtn.Add_Click({ if (Show-ConfigDialog) { Update-SyncButtonState; Update-OnPremUi } })
     $script:UI.Tooltip.SetToolTip($syncBtn, 'Force a Microsoft Entra Connect delta sync and let recent on-prem changes appear in Entra now')
     $connectBtn.Add_Click({ Invoke-Account })
     $disconnectBtn.Add_Click({ Invoke-Disconnect })

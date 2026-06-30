@@ -167,6 +167,29 @@ Assert-That 'config JSON round-trips' {
     $back = $json | ConvertFrom-Json
     @($back.Users.Enabled).Count -eq @($cfg.Users.Enabled).Count
 }
+Assert-That 'default config has the global device/WinRM settings (with sane defaults)' {
+    ($cfg.WinRmTimeoutMs -eq 8000) -and (@($cfg.DeviceCleanupTargets).Count -eq 4) -and
+    (@($cfg.DeviceCleanupTargets) -contains 'Intune') -and (@($cfg.DeviceCleanupTargets) -contains 'AdComputer')
+}
+Assert-That 'Get-TenantProfileList reads a per-tenant LIST (AdServers) as an array, keyed by tenant' {
+    & $mod {
+        $script:Config = @{ Accounts = @(
+                @{ TenantId = 'A'; AdServers = @('dc01.a.dom', 'dc02.a.dom') },
+                @{ TenantId = 'B' }
+            ) }
+        $a = Get-TenantProfileList -Field 'AdServers' -TenantId 'A'
+        $b = Get-TenantProfileList -Field 'AdServers' -TenantId 'B'   # unset -> empty array
+        (@($a).Count -eq 2) -and ($a[0] -eq 'dc01.a.dom') -and (@($b).Count -eq 0)
+    }
+}
+Assert-That 'WinRM open-timeout honours the configured WinRmTimeoutMs (falls back to 8000)' {
+    & $mod {
+        $script:Config = @{ WinRmTimeoutMs = 15000 }
+        $opt = New-AdSyncSessionOption
+        $script:Config = $null
+        [int]$opt.OpenTimeout.TotalMilliseconds -eq 15000
+    }
+}
 
 Write-Host "`n== Hybrid SOA gating ==" -ForegroundColor Cyan
 Assert-That 'Test-ObjectSynced is true ONLY for onPremisesSyncEnabled=true' {
@@ -919,6 +942,9 @@ Assert-That 'sidebar has a Force-AD-sync button, hidden until connected to a hyb
 }
 Assert-That 'sidebar has an explicit on-prem AD connect row (label + button), hidden until hybrid' {
     & $mod { [bool]$script:UI.OnPremBtn -and [bool]$script:UI.OnPremLabel -and (-not $script:UI.OnPremBtn.Visible) -and (-not $script:UI.OnPremLabel.Visible) }
+}
+Assert-That 'sidebar has a Settings (config) button' {
+    & $mod { [bool]$script:UI.ConfigBtn -and ($script:UI.ConfigBtn.Text -match 'Settings') }
 }
 Assert-That 'Exchange tab starts gated (not connected, management panel hidden)' {
     # Note: Control.Visible reports EFFECTIVE visibility (false for any control on a form that was

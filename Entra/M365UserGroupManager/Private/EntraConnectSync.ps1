@@ -66,7 +66,9 @@ function New-AdSyncSessionOption {
        Connect server makes Invoke-Command wait on the default WinRM connect timeout (tens of seconds to
        minutes) -- on the UI thread, that is the "app hangs with no indication" the operator hit. 8s is
        long enough for a healthy on-VPN/in-office connect, short enough to fail fast and report. #>
-    New-PSSessionOption -OpenTimeout 8000 -OperationTimeout 60000 -CancelTimeout 2000
+    $open = 8000
+    try { if ($script:Config -and $script:Config.WinRmTimeoutMs) { $open = [int]$script:Config.WinRmTimeoutMs } } catch { }
+    New-PSSessionOption -OpenTimeout $open -OperationTimeout 60000 -CancelTimeout 2000
 }
 
 function Test-ConnectServerReachable {

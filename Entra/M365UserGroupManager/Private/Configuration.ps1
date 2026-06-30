@@ -61,8 +61,12 @@ function New-DefaultConfig {
         Accounts = @()
         Users    = @{ Enabled = (Get-DefaultEnabledNames -Tab 'User') }
         Groups   = @{ Enabled = (Get-DefaultEnabledNames -Tab 'Group') }
-        # NB: on-prem prefs (expected AD domain / Connect server / last OU / VPN hint) are PER-TENANT now,
-        # stored on each Accounts[] entry -- so the two hybrid tenants never clobber each other's values.
+        # NB: on-prem prefs (expected AD domain / Connect server / last OU / VPN hint) AND device-cleanup
+        # server locations (SCCM provider, site code, AD DC list) are PER-TENANT, stored on each Accounts[]
+        # entry -- so the two hybrid tenants never clobber each other's values.
+        # --- Global (machine/app-wide) settings, edited via the Config dialog ---
+        WinRmTimeoutMs       = 8000                                  # bound on remote calls (force-sync, SCCM delete)
+        DeviceCleanupTargets = @('AdComputer', 'Sccm', 'Intune', 'EntraDevice')   # stores ticked by default on re-image cleanup
     }
 }
 
@@ -92,6 +96,12 @@ function Get-AppConfig {
                     ConnectServer        = [string]$_.ConnectServer
                     LastOnPremOuDn       = [string]$_.LastOnPremOuDn
                     NeedsVpnHint         = [string]$_.NeedsVpnHint
+                    # Per-tenant device-cleanup server locations (Config dialog). SccmServer = SMS Provider /
+                    # site server (AdminService discovery + the WinRM host for Remove-CMDevice); AdServers =
+                    # optional preferred DC list. Absent in older configs -> '' / @().
+                    SccmServer           = [string]$_.SccmServer
+                    SccmSiteCode         = [string]$_.SccmSiteCode
+                    AdServers            = @($_.AdServers | Where-Object { $_ })
                 }
             } | Where-Object { $_.TenantId }
         )
@@ -104,6 +114,14 @@ function Get-AppConfig {
         if ($raw.PSObject.Properties[$tab] -and $raw.$tab -and $raw.$tab.PSObject.Properties['Enabled'] -and $null -ne $raw.$tab.Enabled) {
             $cfg[$tab].Enabled = @($raw.$tab.Enabled | Where-Object { $valid -contains $_ })
         }
+    }
+
+    # Global settings (preserve across loads; keep the default if absent/invalid in the file).
+    if ($raw.PSObject.Properties['WinRmTimeoutMs']) {
+        try { $n = [int]$raw.WinRmTimeoutMs; if ($n -gt 0) { $cfg.WinRmTimeoutMs = $n } } catch { }
+    }
+    if ($raw.PSObject.Properties['DeviceCleanupTargets'] -and $raw.DeviceCleanupTargets) {
+        $cfg.DeviceCleanupTargets = @($raw.DeviceCleanupTargets | Where-Object { $_ })
     }
     return $cfg
 }
@@ -156,6 +174,15 @@ function Set-TenantProfileValue {
     }
     $p[$Field] = $Value
     try { Save-AppConfig -Config $script:Config } catch { }
+}
+
+function Get-TenantProfileList {
+    <# A per-tenant LIST field (e.g. AdServers) as an array (empty if unset). Defaults to the connected
+       tenant. (Get-TenantProfileValue stringifies, which is wrong for a list -- use this for arrays.) #>
+    param([Parameter(Mandatory)][string]$Field, [string]$TenantId = (Get-ConnectedTenantId))
+    $p = Get-TenantProfile -TenantId $TenantId
+    if ($p -and $p.ContainsKey($Field) -and $p[$Field]) { return @($p[$Field]) }
+    return @()
 }
 
 function Get-ConnectedTenantOnPremDomain {
