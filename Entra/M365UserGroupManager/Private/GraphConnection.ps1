@@ -21,6 +21,10 @@ $script:GraphScopes = @(
     'LicenseAssignment.ReadWrite.All'
     'User.Invite.All'                          # send B2B guest invitations (New-MgInvitation)
     'OnPremDirectorySynchronization.Read.All'  # read the Connect server name for the force-sync autofill (best-effort; degrades to a prompt if not consented)
+    # --- Device cleanup (re-image) -- all via raw Invoke-MgGraphRequest, so NO Graph sub-module is added ---
+    'DeviceManagementManagedDevices.ReadWrite.All'  # read + delete the Intune managed device
+    'DeviceManagementRBAC.Read.All'                 # read Multi-Admin-Approval (operationApprovalRequests) status
+    'Directory.AccessAsUser.All'                    # read + delete the Entra ID device object (broad; gated to the device-cleanup feature)
 )
 
 function ConvertTo-ThreePartVersion {

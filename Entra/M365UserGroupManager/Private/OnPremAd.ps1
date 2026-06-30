@@ -226,6 +226,38 @@ function Get-AdGroupForCloudObject {
     return $null
 }
 
+function Find-AdComputer {
+    <# Per-store lookup of the on-prem AD computer object on the connected DC, by name (Filter, not
+       -Identity, so a missing object returns $null instead of throwing). Returns @{ Found; Id (DN);
+       Protected; Count; Detail; Reason; Error }. Never throws. #>
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Dc)
+    try {
+        $c = @(Get-ADComputer -Filter "Name -eq '$(Protect-AdFilterValue $Name)'" -Server $Dc -Properties CanonicalName, ProtectedFromAccidentalDeletion -ErrorAction Stop)
+        if ($c.Count -eq 0) { return @{ Found = $false; Reason = 'Not found in Active Directory.' } }
+        $o = $c[0]
+        return @{ Found = $true; Id = [string]$o.DistinguishedName; Count = $c.Count
+                  Protected = [bool]$o.ProtectedFromAccidentalDeletion; Detail = [string]$o.CanonicalName }
+    } catch {
+        return @{ Found = $false; Error = $true; Reason = "AD computer lookup failed: $($_.Exception.Message)" }
+    }
+}
+
+function Remove-AdComputerObject {
+    <# Delete an AD computer object on $Dc. ProtectedFromAccidentalDeletion silently denies the delete, so
+       the caller must obtain explicit consent and pass -ClearProtection (we NEVER silently clear it).
+       Defaults to a leaf delete; only recurses if AD reports children (rare -- cluster/BitLocker leaves),
+       surfacing that wider blast radius rather than defaulting to -Recursive. #>
+    param([Parameter(Mandatory)][string]$Dn, [Parameter(Mandatory)][string]$Dc, [switch]$ClearProtection)
+    if ($ClearProtection) { Set-ADObject -Identity $Dn -Server $Dc -ProtectedFromAccidentalDeletion:$false -ErrorAction Stop }
+    try {
+        Remove-ADComputer -Identity $Dn -Server $Dc -Confirm:$false -ErrorAction Stop
+    } catch {
+        if ("$($_.Exception.Message)" -match 'not a leaf|children|leaf object') {
+            Remove-ADObject -Identity $Dn -Server $Dc -Recursive -Confirm:$false -ErrorAction Stop
+        } else { throw }
+    }
+}
+
 function Resolve-AdUserFromPerson {
     <# Resolve a picked/loaded directory person to an AD user via its UPN. Person objects come in TWO
        shapes: the person picker uses the 'Detail' key, while Get-UserManagerInfo uses 'Upn' -- accept

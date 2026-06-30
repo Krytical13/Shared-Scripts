@@ -890,6 +890,23 @@ Assert-That 'device-code fallback fires on a WAM/window failure but NOT on a use
     }
 }
 
+Write-Host "`n== Device cleanup ==" -ForegroundColor Cyan
+Assert-That 'Intune MAA detection: ApprovalRequired 403 -> pending (true); plain 403 / 404 -> error (false)' {
+    & $mod {
+        $mk = { param($m) [pscustomobject]@{ Exception = [pscustomobject]@{ Message = $m } } }
+        (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code 403 (Forbidden): ApprovalRequired - this operation requires approval')) -and
+        (-not (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code 403 (Forbidden): Authorization_RequestDenied'))) -and
+        (-not (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code 404 (Not Found)')))
+    }
+}
+Assert-That 'device store defs cover the four cleanup targets (AD / SCCM / Intune / Entra)' {
+    & $mod {
+        $keys = @($script:DeviceStoreDefs.Key)
+        (@($script:DeviceStoreDefs).Count -eq 4) -and ($keys -contains 'AdComputer') -and ($keys -contains 'Sccm') -and
+        ($keys -contains 'Intune') -and ($keys -contains 'EntraDevice')
+    }
+}
+
 Write-Host "`n== Headless form build ==" -ForegroundColor Cyan
 $env:M365UGM_NOLAUNCH = '1'
 $form = $null
@@ -909,13 +926,13 @@ Assert-That 'native dark mode applied when available (.NET 9+/PS7); skipped clea
     $cm = [System.Windows.Forms.Application].GetProperty('ColorMode')
     (-not $cm) -or ("$($cm.GetValue($null))" -eq 'Dark')
 }
-Assert-That 'sidebar nav hosts Users, Groups and Exchange pages' {
+Assert-That 'sidebar nav hosts Users, Groups, Exchange and Devices pages' {
     & $mod {
-        # The TabControl was replaced by a left sidebar + a single page host holding three page panels.
-        ($script:UI.PageHost.Controls.Count -eq 3) -and
-        ($script:UI.NavButtons.Count -eq 3) -and
-        [bool]$script:UI.User.Page -and [bool]$script:UI.Group.Page -and [bool]$script:UI.Exchange.Page -and
-        ($script:UI.NavButtons['Exchange'].Tag -eq 'Exchange')
+        # The TabControl was replaced by a left sidebar + a single page host holding the page panels.
+        ($script:UI.PageHost.Controls.Count -eq 4) -and
+        ($script:UI.NavButtons.Count -eq 4) -and
+        [bool]$script:UI.User.Page -and [bool]$script:UI.Group.Page -and [bool]$script:UI.Exchange.Page -and [bool]$script:UI.Device.Page -and
+        ($script:UI.NavButtons['Device'].Tag -eq 'Device')
     }
 }
 Assert-That 'User New form has the Create-in (cloud/on-prem) toggle + OU picker controls (cloud default)' {
@@ -945,6 +962,13 @@ Assert-That 'sidebar has an explicit on-prem AD connect row (label + button), hi
 }
 Assert-That 'sidebar has a Settings (config) button' {
     & $mod { [bool]$script:UI.ConfigBtn -and ($script:UI.ConfigBtn.Text -match 'Settings') }
+}
+Assert-That 'Devices page exists, gated (overlay + content), cleanup disabled until a device is found' {
+    & $mod {
+        $d = $script:UI.Device
+        [bool]$d.Page -and [bool]$d.Overlay -and [bool]$d.Content -and [bool]$d.NameBox -and [bool]$d.FindBtn -and
+        [bool]$d.CleanupBtn -and (-not $d.CleanupBtn.Enabled) -and (@($d.Stores.Keys).Count -eq 4)
+    }
 }
 Assert-That 'Exchange tab starts gated (not connected, management panel hidden)' {
     # Note: Control.Visible reports EFFECTIVE visibility (false for any control on a form that was
