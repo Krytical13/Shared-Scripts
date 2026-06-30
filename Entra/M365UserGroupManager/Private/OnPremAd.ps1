@@ -448,7 +448,7 @@ function ConvertTo-NewAdUserParams {
     param([object[]]$Changes)
     $paramMap = Get-NewAdUserParamMap
     $ldapMap = Get-CloudToAdAttributeMap
-    $native = @{}; $other = @{}
+    $native = @{}; $other = @{}; $unsupported = @()
     foreach ($c in $Changes) {
         if (-not $c -or -not $c.Name) { continue }
         if ($c.Name -in 'userPrincipalName', 'mailNickname') { continue }
@@ -457,8 +457,9 @@ function ConvertTo-NewAdUserParams {
         if ($null -eq $v -or [string]::IsNullOrWhiteSpace([string]$v)) { continue }
         if ($paramMap.ContainsKey($c.Name))    { $native[$paramMap[$c.Name]] = [string]$v }
         elseif ($ldapMap.ContainsKey($c.Name)) { $other[$ldapMap[$c.Name]] = [string]$v }
+        else { $unsupported += $c.Name }   # on-prem-mastered attr with NO AD mapping (e.g. otherMails) -- caller warns
     }
-    return @{ NativeParams = $native; OtherAttributes = $other }
+    return @{ NativeParams = $native; OtherAttributes = $other; Unsupported = @($unsupported) }
 }
 
 function Get-AdOrganizationalUnitList {

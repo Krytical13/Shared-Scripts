@@ -603,8 +603,11 @@ function New-EntityTab {
     $selectBtn.Add_Click({ param($s, $e) Invoke-SelectExisting -Tab $s.Tag })
     $settingsBtn.Add_Click({
         param($s, $e)
-        if (-not (Show-SettingsDialog -Tab $s.Tag)) { return }
         $tab = $s.Tag
+        # Choosing fields REBUILDS the form. In New mode that discards typed-but-unsaved values (in Edit they
+        # are re-imported below, so nothing is lost there) -- so warn first if the create form has typing.
+        if ($script:UI[$tab].Mode -eq 'New' -and -not (Confirm-LeaveUnsavedChanges -ActionLabel 'Choose fields' -Consequence 'Rebuilding the form will clear the values you have typed.')) { return }
+        if (-not (Show-SettingsDialog -Tab $tab)) { return }
         Build-TabForm -Tab $tab
         # If an object is loaded in Edit mode, re-populate the rebuilt form (and re-capture
         # baselines / OriginalIds) so changing which fields are shown doesn't blank it out.
@@ -678,8 +681,9 @@ function Build-TabForm {
                     # Create form = the always-on essentials, PLUS any ENABLED (Choose fields) attribute that
                     # can actually be set while creating. Read-only / license / manager(Person) fields can't
                     # be set at create, so they stay Edit-only (Build-UserPayload skips Person/License +
-                    # non-Writable anyway -- showing them on New would mislead). On-prem-authority extras get
-                    # hidden again by Set-CreateDestinationFields when an on-prem create is chosen.
+                    # non-Writable anyway -- showing them on New would mislead). NB: an on-prem create can't
+                    # write attrs with no AD mapping (e.g. otherMails) -- Invoke-CreateUserInAd WARNS per
+                    # dropped field; cloud-only extras are hidden by Set-CreateDestinationFields on on-prem.
                     $_.ShowOnNew -or $_.Required -or $_.RequiredForCreate -or
                     (($enabled -contains $_.Name) -and $_.Writable -and ($_.Input -notin 'ReadOnly', 'License', 'Person', 'Password'))
                 } else { $enabled -contains $_.Name }
@@ -2041,6 +2045,13 @@ function Invoke-CreateUserInAd {
 
     # Manager: resolve from the PICKED PERSON by UPN -- not Read-FieldValue (which returns a cloud Id).
     $warnings = New-Object System.Collections.Generic.List[string]
+    # On-prem create can't write attributes that have no AD mapping (e.g. otherMails). Warn per dropped
+    # field rather than silently losing it -- parity with the Edit path's ConvertTo-AdAttributeWrites warning.
+    foreach ($n in @($split.Unsupported)) {
+        $lbl = (Get-CatalogAttribute -Tab 'User' -Name $n).Label
+        if (-not $lbl) { $lbl = $n }
+        [void]$warnings.Add("'$lbl' has no on-premises AD mapping and was not written; set it in the cloud (Edit) after the user syncs.")
+    }
     $mgrField = $ctx.Fields['manager']
     if ($mgrField) {
         $person = $mgrField.People | Select-Object -First 1

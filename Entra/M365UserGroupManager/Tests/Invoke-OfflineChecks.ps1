@@ -302,6 +302,16 @@ Assert-That 'ConvertTo-NewAdUserParams: native params vs OtherAttributes split; 
         (-not $r.OtherAttributes.ContainsKey('userPrincipalName')) -and (-not $r.OtherAttributes.ContainsKey('mailNickname'))
     }
 }
+Assert-That 'ConvertTo-NewAdUserParams reports an unmapped on-prem attr (otherMails) as Unsupported (on-prem create warns, not drops)' {
+    & $mod {
+        $r = ConvertTo-NewAdUserParams -Changes @(
+            @{ Name = 'jobTitle'; Value = 'Engineer' },                 # mapped -> native
+            @{ Name = 'otherMails'; Value = @('alt@contoso.com') }      # no AD mapping -> Unsupported (must warn)
+        )
+        ($r.NativeParams['Title'] -eq 'Engineer') -and ($r.Unsupported -contains 'otherMails') -and
+        (-not $r.OtherAttributes.ContainsKey('otherMails'))
+    }
+}
 Assert-That 'Test-AdSyncForceAllowed: allows only an active, idle, scheduler-enabled exporter' {
     & $mod {
         $ok      = Test-AdSyncForceAllowed -Scheduler ([pscustomobject]@{ SyncCycleEnabled = $true;  StagingModeEnabled = $false }) -Busy $false
