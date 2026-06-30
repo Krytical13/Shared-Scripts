@@ -891,12 +891,13 @@ Assert-That 'device-code fallback fires on a WAM/window failure but NOT on a use
 }
 
 Write-Host "`n== Device cleanup ==" -ForegroundColor Cyan
-Assert-That 'Intune MAA detection: ApprovalRequired 403 -> pending (true); plain 403 / 404 -> error (false)' {
+Assert-That 'Intune MAA detection reads the response BODY: ApprovalRequired -> pending; plain 403 / 404 -> error' {
     & $mod {
-        $mk = { param($m) [pscustomobject]@{ Exception = [pscustomobject]@{ Message = $m } } }
-        (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code 403 (Forbidden): ApprovalRequired - this operation requires approval')) -and
-        (-not (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code 403 (Forbidden): Authorization_RequestDenied'))) -and
-        (-not (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code 404 (Not Found)')))
+        # Realistic shape: a generic Exception.Message + the real code/text in ErrorDetails.Message (body).
+        $mk = { param($exMsg, $bodyMsg) [pscustomobject]@{ Exception = [pscustomobject]@{ Message = $exMsg }; ErrorDetails = [pscustomobject]@{ Message = $bodyMsg } } }
+        (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code does not indicate success: 403 (Forbidden).' '{"error":{"code":"ApprovalRequired","message":"Approval Required. Request Approval using the request id."}}')) -and
+        (-not (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code does not indicate success: 403 (Forbidden).' '{"error":{"code":"Authorization_RequestDenied","message":"Insufficient privileges to complete the operation."}}'))) -and
+        (-not (Test-IntuneApprovalRequiredResponse (& $mk 'Response status code does not indicate success: 404 (Not Found).' '')))
     }
 }
 Assert-That 'device store defs cover the four cleanup targets (AD / SCCM / Intune / Entra)' {

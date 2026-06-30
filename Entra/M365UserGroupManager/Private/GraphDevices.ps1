@@ -80,10 +80,16 @@ function Submit-OperationApprovalDecision {
 
 function Test-IntuneApprovalRequiredResponse {
     <# PURE: given an error record from a managed-device DELETE, is this the EXPECTED Multi-Admin-Approval
-       403 ("ApprovalRequired") rather than a real failure? Match on the documented code/text; default to
-       NOT-approval so a genuine 403 (permissions) is still surfaced as an error. #>
+       403 ("ApprovalRequired") rather than a real failure? The real Graph body is
+       {"code":"ApprovalRequired","message":"Approval Required. Request Approval ..."}, which lands in
+       $_.ErrorDetails.Message (the response body) -- $_.Exception.Message is often just the generic
+       "Response status code does not indicate success: 403 (Forbidden)." So we check BOTH, and match the
+       real code + message text. Defaults to NOT-approval, so a genuine permissions 403 still surfaces as
+       an error (under-claiming a pending submit is safe; over-claiming a delete is not). #>
     param($ErrorRecord)
-    $msg = "$($ErrorRecord.Exception.Message)"
-    if ($msg -notmatch '403|[Ff]orbidden|Approval') { return $false }
-    return ($msg -match 'ApprovalRequired|Multi.?Admin|operationApproval|requires approval|pending approval')
+    $texts = @("$($ErrorRecord.Exception.Message)")
+    try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { $texts += "$($ErrorRecord.ErrorDetails.Message)" } } catch { }
+    $msg = ($texts -join ' ')
+    if ($msg -notmatch '403|[Ff]orbidden|[Aa]pproval') { return $false }
+    return ($msg -match 'ApprovalRequired|Approval Required|Request Approval|Multi.?Admin|operationApproval|requires approval|pending approval')
 }

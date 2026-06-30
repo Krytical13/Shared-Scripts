@@ -157,7 +157,7 @@ function New-MainForm {
     Update-ApprovalsActivation
 
     # --- Wire nav + connection events ------------------------------------------------------
-    foreach ($item in @($navUser, $navGroup, $navExch, $navDevice)) {
+    foreach ($item in @($navUser, $navGroup, $navExch, $navDevice, $navApprov)) {
         $item.Button.Add_Click({ param($s, $e) Invoke-NavSwitch -Page $s.Tag })
     }
     Set-PrimaryButtonStyle $connectBtn        # the main call-to-action in the sidebar
@@ -1123,8 +1123,9 @@ function Complete-Connection {
     $null = Invoke-WithProgress -Title "Setting up $($Context.Account)" -Work {
         Reset-HybridState            # recompute hybrid + AD-write capability for the (new) tenant
         # A new tenant means any object loaded from the PREVIOUS tenant is stale -- clear it so it can't be
-        # re-imported under the new tenant (e.g. via Invoke-ConnectOnPrem); the tabs rebuild blank below.
-        $script:State.SelectedUser = $null; $script:State.SelectedGroup = $null
+        # re-imported / re-acted-on under the new tenant (e.g. via Invoke-ConnectOnPrem, or a device cleanup
+        # that would otherwise delete tenant-A's cached IDs against tenant B). The tabs/pages rebuild below.
+        $script:State.SelectedUser = $null; $script:State.SelectedGroup = $null; $script:State.SelectedDevice = $null
         Save-CurrentAccount
         # ONE Graph $batch fetches the org + subscribed SKUs and seeds the caches the next steps read,
         # so the whole connect bootstrap is a single round trip (falls back to per-call reads if /$batch

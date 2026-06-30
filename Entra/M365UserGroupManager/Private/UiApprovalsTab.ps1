@@ -106,6 +106,7 @@ function Invoke-ApprovalsRefresh {
             try { $script:UI.Approval.LoadedRequests = @(Get-PendingApprovalRequests) }
             catch { $script:UI.Approval.LoadError = "$($_.Exception.Message)" }
         } | Out-Null
+        if ($script:UiClosing) { return }
         $reqs = @($a.LoadedRequests); $err = $a.LoadError; $a.LoadedRequests = $null; $a.LoadError = $null
 
         $a.List.Items.Clear(); $a.ApproveBtn.Enabled = $false; $a.RejectBtn.Enabled = $false
@@ -141,6 +142,7 @@ function Invoke-ApprovalDecision {
             try { Submit-OperationApprovalDecision -Id $tag.Id -Decision $Decision -Justification $note }
             catch { $script:UI.Approval.DecisionError = "$($_.Exception.Message)" }
         } | Out-Null
+        if ($script:UiClosing) { return }
         $msg = $a.DecisionError; $a.DecisionError = $null
         if ($msg) {
             [System.Windows.Forms.MessageBox]::Show("Couldn't $Decision the request:`n$msg`n`n(You can't approve your own request, and only an authorized admin can.)", "$verb failed", 'OK', 'Warning') | Out-Null

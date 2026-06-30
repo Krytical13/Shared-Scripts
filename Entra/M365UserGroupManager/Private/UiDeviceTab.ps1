@@ -117,13 +117,12 @@ function Update-DeviceActivation {
     $d = $script:UI.Device
     $d.Overlay.Visible = -not $connected
     $d.Content.Visible = $connected
-    if (-not $connected) {
-        $d.Overlay.BringToFront()
-        # Reset transient state on disconnect so a stale lookup can't linger.
-        foreach ($k in $d.Stores.Keys) { $d.Stores[$k].Result = $null; $d.Stores[$k].StatusLbl.Text = "$([char]0x2014)"; $d.Stores[$k].Check.Enabled = $false }
-        $d.CleanupBtn.Enabled = $false; $d.ResultLbl.Text = ''
-        $script:State.SelectedDevice = $null
-    } else { $d.Content.BringToFront() }
+    if ($connected) { $d.Content.BringToFront() } else { $d.Overlay.BringToFront() }
+    # ANY connection change (connect / SWITCH / disconnect) invalidates a prior lookup -- reset the grid so
+    # a tenant-A device can never be cleaned up under tenant B. (Only ever called on connection transitions.)
+    foreach ($k in $d.Stores.Keys) { $d.Stores[$k].Result = $null; $d.Stores[$k].StatusLbl.Text = "$([char]0x2014)"; $d.Stores[$k].Check.Enabled = $false }
+    $d.CleanupBtn.Enabled = $false; $d.ResultLbl.Text = ''
+    $script:State.SelectedDevice = $null
 }
 
 function Invoke-DeviceLookup {
@@ -151,6 +150,7 @@ function Invoke-DeviceLookup {
             Set-Progress 'Checking Configuration Manager...'
             $results.Sccm = Find-SccmDevice -Name $name -Server $sccmServer -TimeoutSec ([Math]::Ceiling(([int]$script:Config.WinRmTimeoutMs) / 1000))
         } | Out-Null
+        if ($script:UiClosing) { return }
 
         $any = $false
         foreach ($s in $script:DeviceStoreDefs) {
@@ -165,7 +165,7 @@ function Invoke-DeviceLookup {
                 $store.Check.Enabled = $false
             }
         }
-        $script:State.SelectedDevice = @{ Name = $name; Results = $results }
+        $script:State.SelectedDevice = @{ Name = $name; Results = $results; TenantId = (Get-ConnectedTenantId) }
         $d.CleanupBtn.Enabled = $any
         Set-Progress $(if ($any) { "Found $name in one or more stores." } else { "No record of $name found." })
     } finally { Set-UiBusy $false }
@@ -176,6 +176,12 @@ function Invoke-DeviceCleanup {
        store; Intune is last and Multi-Admin-Approval aware (may report PENDING, not deleted). #>
     if (-not (Test-GraphConnected) -or -not $script:State.SelectedDevice) { return }
     $d = $script:UI.Device
+    # Belt-and-braces (the grid is also reset on a connection change): never clean up a lookup made under a
+    # DIFFERENT account than the one now connected -- that would delete tenant-A's cached IDs against tenant B.
+    if ([string]$script:State.SelectedDevice.TenantId -ne (Get-ConnectedTenantId)) {
+        [System.Windows.Forms.MessageBox]::Show('This device was found under a different account. Find it again with the current account before cleaning up.', 'Account changed', 'OK', 'Warning') | Out-Null
+        return
+    }
     $name = [string]$script:State.SelectedDevice.Name
 
     # Which ticked stores actually have a found object.
@@ -200,18 +206,25 @@ function Invoke-DeviceCleanup {
     try {
         Invoke-WithProgress -Title "Cleaning up $name" -Work {
             foreach ($key in $selected) {
+                if ($script:UiClosing) { break }
                 $res = $d.Stores[$key].Result
                 $label = $d.Stores[$key].Label
                 Set-Progress "Removing from $label..."
+                # Refuse to auto-pick one of several matches (common on a re-imaged box) -- deleting the
+                # arbitrary "first" could remove the NEW enrollment. Skip + tell the operator to disambiguate.
+                if ([int]$res.Count -gt 1) {
+                    [void]$summary.Add("$label`: skipped ($([int]$res.Count) matches -- resolve duplicates manually)"); continue
+                }
                 $outcome = switch ($key) {
                     'AdComputer'  { Remove-DeviceFromAd -Result $res -Dc $adState.Dc -DeviceName $name }
-                    'Sccm'        { Remove-DeviceFromSccm -Result $res -Server $sccmServer -SiteCode $sccmSite }
+                    'Sccm'        { Remove-DeviceFromSccm -Result $res -Server $sccmServer -SiteCode $sccmSite -DeviceName $name }
                     'EntraDevice' { Remove-DeviceFromEntra -Result $res }
                     'Intune'      { Remove-DeviceFromIntune -Result $res -Justification $justification }
                 }
                 [void]$summary.Add("$label`: $outcome")
             }
         } | Out-Null
+        if ($script:UiClosing) { return }
     } finally { Set-UiBusy $false }
 
     $d.ResultLbl.Text = ($summary -join '   |   ')
@@ -225,23 +238,28 @@ function Remove-DeviceFromAd {
     param($Result, [string]$Dc, [string]$DeviceName)
     if (-not $Dc) { return 'skipped (on-prem not connected)' }
     try {
-        if ($Result.Protected) {
+        # Re-resolve on the (forest-verified) DC at delete time -- don't trust the cached DN; the object
+        # could have moved/changed. This is the computer-object analogue of the user/group SID anchor.
+        $fresh = Find-AdComputer -Name $DeviceName -Dc $Dc
+        if (-not $fresh.Found) { return 'not found (already removed?)' }
+        if ([int]$fresh.Count -gt 1) { return "skipped ($([int]$fresh.Count) matches -- resolve manually)" }
+        if ($fresh.Protected) {
             $ok = [System.Windows.Forms.MessageBox]::Show(
                 "'$DeviceName' is protected from accidental deletion in AD. Remove that protection and delete it?",
                 'Protected object', 'YesNo', 'Warning')
             if ($ok -ne 'Yes') { return 'skipped (protected)' }
-            Remove-AdComputerObject -Dn $Result.Id -Dc $Dc -ClearProtection
+            Remove-AdComputerObject -Dn $fresh.Id -Dc $Dc -ClearProtection
         } else {
-            Remove-AdComputerObject -Dn $Result.Id -Dc $Dc
+            Remove-AdComputerObject -Dn $fresh.Id -Dc $Dc
         }
         return 'deleted'
     } catch { return "error: $($_.Exception.Message)" }
 }
 
 function Remove-DeviceFromSccm {
-    param($Result, [string]$Server, [string]$SiteCode)
+    param($Result, [string]$Server, [string]$SiteCode, [string]$DeviceName)
     if (-not $Server -or -not $SiteCode) { return 'skipped (SCCM server/site not configured)' }
-    $r = Remove-SccmDeviceRemote -Server $Server -SiteCode $SiteCode -ResourceId ([int]$Result.Id)
+    $r = Remove-SccmDeviceRemote -Server $Server -SiteCode $SiteCode -ResourceId ([int]$Result.Id) -DeviceName $DeviceName
     if ($r.Removed) { return 'deleted' }
     return "error: $($r.Error)"
 }

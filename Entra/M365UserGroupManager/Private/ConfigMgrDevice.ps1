@@ -36,19 +36,28 @@ function Remove-SccmDeviceRemote {
     param(
         [Parameter(Mandatory)][string]$Server,
         [Parameter(Mandatory)][string]$SiteCode,
-        [Parameter(Mandatory)][int]$ResourceId
+        [Parameter(Mandatory)][int]$ResourceId,
+        [string]$DeviceName
     )
     try {
         Invoke-Command -ComputerName $Server -SessionOption (New-AdSyncSessionOption) -ErrorAction Stop `
-            -ArgumentList $SiteCode, $ResourceId -ScriptBlock {
-                param($Site, $Rid)
+            -ArgumentList $SiteCode, $ResourceId, $DeviceName -ScriptBlock {
+                param($Site, $Rid, $Name)
                 Import-Module (Join-Path $env:SMS_ADMIN_UI_PATH '..\ConfigurationManager.psd1') -ErrorAction Stop
-                $drive = "$Site`:"
                 if (-not (Get-PSDrive -Name $Site -ErrorAction SilentlyContinue)) {
                     [void](New-PSDrive -Name $Site -PSProvider CMSite -Root $env:COMPUTERNAME -ErrorAction Stop)
                 }
-                Push-Location $drive
-                try { Remove-CMDevice -ResourceId $Rid -Force -ErrorAction Stop }
+                Push-Location "$Site`:"
+                try {
+                    # TOCTOU guard: ConfigMgr recycles ResourceIDs, so re-confirm the id still maps to the
+                    # SAME device name captured at lookup before deleting -- never delete a recycled id blind.
+                    if ($Name) {
+                        $cur = Get-CMDevice -ResourceId $Rid -ErrorAction Stop
+                        if (-not $cur) { throw "ResourceID $Rid no longer exists (already removed?)." }
+                        if ([string]$cur.Name -ne $Name) { throw "ResourceID $Rid now maps to '$($cur.Name)', not '$Name' -- aborting to avoid deleting the wrong device." }
+                    }
+                    Remove-CMDevice -ResourceId $Rid -Force -ErrorAction Stop
+                }
                 finally { Pop-Location }
             }
         return @{ Removed = $true }
