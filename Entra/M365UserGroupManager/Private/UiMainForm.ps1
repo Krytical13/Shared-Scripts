@@ -68,41 +68,71 @@ function New-MainForm {
     # very bottom by a thin separator because it's app config, not a connection action.
     $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
     $connPanel.Dock = 'Fill'; $connPanel.AutoSize = $true; $connPanel.AutoSizeMode = 'GrowAndShrink'
-    $connPanel.ColumnCount = 1; $connPanel.RowCount = 9; $connPanel.BackColor = $t.NavBg
+    $connPanel.ColumnCount = 1; $connPanel.RowCount = 5; $connPanel.BackColor = $t.NavBg
     $connPanel.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 14)
     [void]$connPanel.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     $connCap = New-Object System.Windows.Forms.Label
     $connCap.Text = 'CONNECTION'; $connCap.AutoSize = $true; $connCap.ForeColor = $t.Muted; $connCap.Font = $t.FontNavHdr
     $connCap.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 4)
+
+    # A tinted "chip" card: a status label on top + an action button under it (+ optional hidden backing
+    # buttons in row 2 that the chip's flyout drives, so the connection state-updaters keep their handles).
+    $newChip = {
+        param($rows)
+        $c = New-Object System.Windows.Forms.TableLayoutPanel
+        $c.Dock = 'Fill'; $c.AutoSize = $true; $c.AutoSizeMode = 'GrowAndShrink'; $c.ColumnCount = 1; $c.RowCount = $rows
+        $c.BackColor = $t.SurfaceAlt; $c.Margin = New-Object System.Windows.Forms.Padding(0, 2, 0, 8); $c.Padding = New-Object System.Windows.Forms.Padding(8, 8, 8, 8)
+        [void]$c.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+        $c
+    }
+    $themeMenu = { param($m) $m.BackColor = $t.Surface; $m.ForeColor = $t.Text; $m.ShowImageMargin = $false }
+
+    # --- CLOUD identity chip: status line + one action button. Signed out -> Connect; signed in -> opens a
+    #     manage flyout (Switch account / Disconnect). SAME $script:UI handles, so Update-ConnectionLabel /
+    #     Set-UiBusy drive ConnLabel/ConnectBtn/DisconnectBtn unchanged. Disconnect is a hidden backing
+    #     button (its .Enabled is maintained by the updaters and mirrored onto the flyout item at open).
     $connLabel = New-Object System.Windows.Forms.Label
-    $connLabel.Text = "$([char]0x25CB) Not connected"; $connLabel.AutoSize = $true; $connLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 28), 0)
-    $connLabel.Font = $t.FontBase; $connLabel.ForeColor = $t.ErrText; $connLabel.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 8)
+    $connLabel.Text = "$([char]0x25CB) Not connected"; $connLabel.AutoSize = $true; $connLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 44), 0)
+    $connLabel.Font = $t.FontBase; $connLabel.ForeColor = $t.ErrText; $connLabel.Margin = New-Object System.Windows.Forms.Padding(2, 0, 2, 6)
     $connectBtn = New-Object System.Windows.Forms.Button
-    $connectBtn.Text = '&Connect'; $connectBtn.Dock = 'Fill'; $connectBtn.Height = $t.BtnHPrimary; $connectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 2, 3, 6)
+    $connectBtn.Text = '&Connect'; $connectBtn.Dock = 'Fill'; $connectBtn.Height = $t.BtnHPrimary; $connectBtn.Margin = New-Object System.Windows.Forms.Padding(0)
     $disconnectBtn = New-Object System.Windows.Forms.Button
-    $disconnectBtn.Text = 'Dis&connect'; $disconnectBtn.Dock = 'Fill'; $disconnectBtn.Height = $t.BtnH; $disconnectBtn.Enabled = $false; $disconnectBtn.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 0)
-    # On-prem AD connection -- a SEPARATE connect from the cloud sign-in (the on-prem network is reached by
-    # VPN / LAN / RDP, independent of which tenant you're signed into). The label is the second line of the
-    # connection banner; both row + button are hidden until the tenant is known hybrid (Update-OnPremUi).
-    # Indented left ($t.GapLg) so the trio reads as nested under the cloud sign-in above.
+    $disconnectBtn.Text = 'Dis&connect'; $disconnectBtn.Dock = 'Fill'; $disconnectBtn.Height = $t.BtnH; $disconnectBtn.Enabled = $false; $disconnectBtn.Visible = $false; $disconnectBtn.Margin = New-Object System.Windows.Forms.Padding(0)
+    $cloudMenu = New-Object System.Windows.Forms.ContextMenuStrip; & $themeMenu $cloudMenu
+    $miSwitch = $cloudMenu.Items.Add('&Switch account...')
+    $miDisconnect = $cloudMenu.Items.Add('Dis&connect')
+    $cloudChip = & $newChip 3
+    $cloudChip.Controls.Add($connLabel, 0, 0); $cloudChip.Controls.Add($connectBtn, 0, 1); $cloudChip.Controls.Add($disconnectBtn, 0, 2)
+
+    # --- ON-PREM AD chip (hybrid tenants only; reached by VPN/LAN/RDP independent of the cloud sign-in):
+    #     status + a button that connects on-prem (signed out of AD) or opens a flyout (Reconnect / Force AD
+    #     sync) when connected. Hidden until the tenant is known hybrid (Update-OnPremUi toggles OnPremChip).
+    #     $syncBtn stays an UNPARENTED backing control: Update-SyncButtonState still maintains its .Visible/
+    #     .Text as the "is sync available + which server" signal, read onto the flyout item at open.
     $onpremLabel = New-Object System.Windows.Forms.Label
-    $onpremLabel.Text = ''; $onpremLabel.AutoSize = $true; $onpremLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 28), 0)
-    $onpremLabel.Font = $t.FontBase; $onpremLabel.ForeColor = $t.Muted; $onpremLabel.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 10, 3, 6); $onpremLabel.Visible = $false
+    $onpremLabel.Text = ''; $onpremLabel.AutoSize = $true; $onpremLabel.MaximumSize = New-Object System.Drawing.Size(($t.NavW - 44), 0)
+    $onpremLabel.Font = $t.FontBase; $onpremLabel.ForeColor = $t.Muted; $onpremLabel.Margin = New-Object System.Windows.Forms.Padding(2, 0, 2, 6); $onpremLabel.Visible = $false
     $onpremBtn = New-Object System.Windows.Forms.Button
-    $onpremBtn.Text = 'Connect on-&prem AD'; $onpremBtn.Dock = 'Fill'; $onpremBtn.Height = $t.BtnH; $onpremBtn.Visible = $false; $onpremBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 0, 3, 0)
-    # Force a directory sync (hybrid tenants only) -- shown by Update-SyncButtonState when synced.
-    $syncBtn = New-Object System.Windows.Forms.Button
-    $syncBtn.Text = 'Force AD &sync'; $syncBtn.Dock = 'Fill'; $syncBtn.Height = $t.BtnH; $syncBtn.Visible = $false; $syncBtn.Margin = New-Object System.Windows.Forms.Padding($t.GapLg, 8, 3, 0)
-    # Thin separator detaches Settings from the connection actions above it.
+    $onpremBtn.Text = 'Connect on-&prem AD'; $onpremBtn.Dock = 'Fill'; $onpremBtn.Height = $t.BtnH; $onpremBtn.Visible = $false; $onpremBtn.Margin = New-Object System.Windows.Forms.Padding(0)
+    $syncBtn = New-Object System.Windows.Forms.Button   # unparented backing control for the flyout (see above)
+    $syncBtn.Text = 'Force AD &sync'; $syncBtn.Height = $t.BtnH; $syncBtn.Visible = $false
+    $onpremMenu = New-Object System.Windows.Forms.ContextMenuStrip; & $themeMenu $onpremMenu
+    $miReconnect = $onpremMenu.Items.Add('Reco&nnect on-prem AD')
+    $miSync = $onpremMenu.Items.Add('Force AD &sync')
+    $onpremChip = & $newChip 2
+    $onpremChip.Visible = $false
+    $onpremChip.Controls.Add($onpremLabel, 0, 0); $onpremChip.Controls.Add($onpremBtn, 0, 1)
+
+    # Thin separator detaches Settings from the connection chips above it.
     $configSep = New-Object System.Windows.Forms.Panel
-    $configSep.Height = 1; $configSep.Dock = 'Fill'; $configSep.BackColor = $t.Border; $configSep.Margin = New-Object System.Windows.Forms.Padding(3, 12, 3, 0)
+    $configSep.Height = 1; $configSep.Dock = 'Fill'; $configSep.BackColor = $t.Border; $configSep.Margin = New-Object System.Windows.Forms.Padding(3, 4, 3, 0)
     # Settings / config (server locations etc.) -- a gear that opens the per-tenant + global config dialog.
     $configBtn = New-Object System.Windows.Forms.Button
     $configBtn.Text = "$([char]0x2699) &Settings"; $configBtn.Dock = 'Fill'; $configBtn.Height = $t.BtnH; $configBtn.Margin = New-Object System.Windows.Forms.Padding(3, 8, 3, 0)
     $connPanel.Controls.Add($connCap, 0, 0)
-    $connPanel.Controls.Add($connLabel, 0, 1); $connPanel.Controls.Add($connectBtn, 0, 2); $connPanel.Controls.Add($disconnectBtn, 0, 3)
-    $connPanel.Controls.Add($onpremLabel, 0, 4); $connPanel.Controls.Add($onpremBtn, 0, 5); $connPanel.Controls.Add($syncBtn, 0, 6)
-    $connPanel.Controls.Add($configSep, 0, 7); $connPanel.Controls.Add($configBtn, 0, 8)
+    $connPanel.Controls.Add($cloudChip, 0, 1)
+    $connPanel.Controls.Add($onpremChip, 0, 2)
+    $connPanel.Controls.Add($configSep, 0, 3); $connPanel.Controls.Add($configBtn, 0, 4)
 
     $nav.Controls.Add($brand, 0, 0); $nav.Controls.Add($cap, 0, 1)
     $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4)
@@ -148,6 +178,8 @@ function New-MainForm {
         Form = $form; Tooltip = $tooltip; ErrorProvider = $errorProvider
         ConnectBtn = $connectBtn; DisconnectBtn = $disconnectBtn; SyncBtn = $syncBtn
         OnPremBtn = $onpremBtn; OnPremLabel = $onpremLabel; ConfigBtn = $configBtn
+        CloudMenu = $cloudMenu; CloudDisconnectItem = $miDisconnect
+        OnPremChip = $onpremChip; OnPremMenu = $onpremMenu; OnPremSyncItem = $miSync
         ConnLabel = $connLabel; Status = $status; Progress = $progress
         NavPanel = $nav; PageHost = $pageHost; HeaderTitle = $hdrTitle; CurrentPage = 'User'
         NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button; Device = $navDevice.Button; Approval = $navApprov.Button }
@@ -176,11 +208,33 @@ function New-MainForm {
     Set-SecondaryButtonStyle $syncBtn
     Set-SecondaryButtonStyle $configBtn
     $configBtn.Add_Click({ if (Show-ConfigDialog) { Update-SyncButtonState; Update-OnPremUi } })
-    $script:UI.Tooltip.SetToolTip($syncBtn, 'Force a Microsoft Entra Connect delta sync and let recent on-prem changes appear in Entra now')
-    $connectBtn.Add_Click({ Invoke-Account })
-    $disconnectBtn.Add_Click({ Invoke-Disconnect })
-    $onpremBtn.Add_Click({ Invoke-ConnectOnPrem })
-    $syncBtn.Add_Click({
+    $miSync.ToolTipText = 'Force a Microsoft Entra Connect delta sync and let recent on-prem changes appear in Entra now'
+    # Cloud chip: signed out -> Connect; signed in -> open the manage flyout. All handlers are PLAIN
+    # scriptblocks (closure trap) and route through the SAME Invoke-* fns, so the forest/tenant gates inside
+    # them are preserved. Disconnect is gated on the backing button's .Enabled (maintained by the updaters).
+    $connectBtn.Add_Click({
+        param($s, $e)
+        if (Test-GraphConnected) {
+            $script:UI.CloudDisconnectItem.Enabled = [bool]$script:UI.DisconnectBtn.Enabled
+            $script:UI.CloudMenu.Show($s, 0, $s.Height)
+        } else { Invoke-Account }
+    })
+    $miSwitch.Add_Click({ Invoke-Account })
+    $miDisconnect.Add_Click({ Invoke-Disconnect })
+    # On-prem chip: AD connected -> open the flyout (Reconnect / Force AD sync, the latter shown only when a
+    # sync is available -- read off the backing $syncBtn the updater maintains); else connect/retry on-prem.
+    $onpremBtn.Add_Click({
+        param($s, $e)
+        $st = Get-AdState
+        if ($st -and $st.Available) {
+            $sy = $script:UI.SyncBtn
+            $script:UI.OnPremSyncItem.Visible = [bool]$sy.Visible
+            $script:UI.OnPremSyncItem.Text = $sy.Text
+            $script:UI.OnPremMenu.Show($s, 0, $s.Height)
+        } else { Invoke-ConnectOnPrem }
+    })
+    $miReconnect.Add_Click({ Invoke-ConnectOnPrem })
+    $miSync.Add_Click({
         Set-UiBusy $true
         try {
             $r = Invoke-ForceDirectorySync
@@ -1010,7 +1064,7 @@ function Update-ConnectionLabel {
         $script:UI.ConnLabel.Text = "$([char]0x25CF) Connected: $($ctx.Account)  [$domain]"
         $script:UI.ConnLabel.ForeColor = $t.OkText
         $script:UI.ConnLabel.BackColor = $t.OkBack
-        $script:UI.ConnectBtn.Text = '&Switch account...'
+        $script:UI.ConnectBtn.Text = "&Account  $([char]0x25BE)"   # opens the manage flyout (Switch / Disconnect)
         $script:UI.DisconnectBtn.Enabled = $true
     } else {
         $script:UI.ConnLabel.Text = "$([char]0x25CB) Not connected"
@@ -1053,6 +1107,7 @@ function Update-OnPremUi {
     $t = Get-Theme
     $s = Get-OnPremUiState
     $hybrid = ($s.State -ne 'CloudOnly')
+    if ($script:UI.OnPremChip) { $script:UI.OnPremChip.Visible = $hybrid }   # show/hide the whole on-prem card
     $script:UI.OnPremLabel.Visible = $hybrid
     $script:UI.OnPremBtn.Visible = $hybrid
     if (-not $hybrid) { return }
