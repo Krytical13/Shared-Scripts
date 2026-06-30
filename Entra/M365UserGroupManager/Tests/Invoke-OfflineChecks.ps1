@@ -906,6 +906,16 @@ Assert-That 'device store defs cover the four cleanup targets (AD / SCCM / Intun
         ($keys -contains 'Intune') -and ($keys -contains 'EntraDevice')
     }
 }
+Assert-That 'MAA approval decision builds the right beta approve/reject endpoint (raw call, no beta module)' {
+    & $mod {
+        # Submit-OperationApprovalDecision must exist with an approve|reject ValidateSet, and we must NOT
+        # have imported a Microsoft.Graph.Beta.* module (which would conflict with the pinned v1.0 set).
+        $cmd = Get-Command Submit-OperationApprovalDecision -ErrorAction SilentlyContinue
+        $hasDecision = $cmd -and ($cmd.Parameters.ContainsKey('Decision'))
+        $noBeta = -not (Get-Module -Name 'Microsoft.Graph.Beta*')
+        [bool]$hasDecision -and $noBeta -and [bool](Get-Command Get-PendingApprovalRequests -ErrorAction SilentlyContinue)
+    }
+}
 
 Write-Host "`n== Headless form build ==" -ForegroundColor Cyan
 $env:M365UGM_NOLAUNCH = '1'
@@ -926,13 +936,14 @@ Assert-That 'native dark mode applied when available (.NET 9+/PS7); skipped clea
     $cm = [System.Windows.Forms.Application].GetProperty('ColorMode')
     (-not $cm) -or ("$($cm.GetValue($null))" -eq 'Dark')
 }
-Assert-That 'sidebar nav hosts Users, Groups, Exchange and Devices pages' {
+Assert-That 'sidebar nav hosts Users, Groups, Exchange, Devices and Approvals pages' {
     & $mod {
         # The TabControl was replaced by a left sidebar + a single page host holding the page panels.
-        ($script:UI.PageHost.Controls.Count -eq 4) -and
-        ($script:UI.NavButtons.Count -eq 4) -and
-        [bool]$script:UI.User.Page -and [bool]$script:UI.Group.Page -and [bool]$script:UI.Exchange.Page -and [bool]$script:UI.Device.Page -and
-        ($script:UI.NavButtons['Device'].Tag -eq 'Device')
+        ($script:UI.PageHost.Controls.Count -eq 5) -and
+        ($script:UI.NavButtons.Count -eq 5) -and
+        [bool]$script:UI.User.Page -and [bool]$script:UI.Group.Page -and [bool]$script:UI.Exchange.Page -and
+        [bool]$script:UI.Device.Page -and [bool]$script:UI.Approval.Page -and
+        ($script:UI.NavButtons['Approval'].Tag -eq 'Approval')
     }
 }
 Assert-That 'User New form has the Create-in (cloud/on-prem) toggle + OU picker controls (cloud default)' {

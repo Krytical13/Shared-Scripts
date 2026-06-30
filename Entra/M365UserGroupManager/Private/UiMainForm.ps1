@@ -43,10 +43,10 @@ function New-MainForm {
 
     # ----- Left sidebar: brand / nav / connection ------------------------------------------
     $nav = New-Object System.Windows.Forms.TableLayoutPanel
-    $nav.Dock = 'Fill'; $nav.BackColor = $t.NavBg; $nav.ColumnCount = 1; $nav.RowCount = 8
+    $nav.Dock = 'Fill'; $nav.BackColor = $t.NavBg; $nav.ColumnCount = 1; $nav.RowCount = 9
     $nav.Margin = New-Object System.Windows.Forms.Padding(0)
     [void]$nav.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
-    foreach ($h in 66, 24, 44, 44, 44, 44) { [void]$nav.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, $h))) }
+    foreach ($h in 66, 24, 44, 44, 44, 44, 44) { [void]$nav.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, $h))) }
     [void]$nav.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))   # spacer
     [void]$nav.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))       # connection
 
@@ -61,6 +61,7 @@ function New-MainForm {
     $navGroup  = New-NavItem -Key 'Group'    -Text 'Groups'   -Glyph ([char]0xE716)   # People
     $navExch   = New-NavItem -Key 'Exchange' -Text 'Exchange' -Glyph ([char]0xE715)   # Mail
     $navDevice = New-NavItem -Key 'Device'   -Text 'Devices'  -Glyph ([char]0xE977)   # Devices
+    $navApprov = New-NavItem -Key 'Approval' -Text 'Approvals' -Glyph ([char]0xE73E)  # CheckMark
 
     # Connection block, pinned to the sidebar bottom.
     $connPanel = New-Object System.Windows.Forms.TableLayoutPanel
@@ -94,8 +95,9 @@ function New-MainForm {
     $connPanel.Controls.Add($configBtn, 0, 6)
 
     $nav.Controls.Add($brand, 0, 0); $nav.Controls.Add($cap, 0, 1)
-    $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4); $nav.Controls.Add($navDevice.Row, 0, 5)
-    $nav.Controls.Add($connPanel, 0, 7)
+    $nav.Controls.Add($navUser.Row, 0, 2); $nav.Controls.Add($navGroup.Row, 0, 3); $nav.Controls.Add($navExch.Row, 0, 4)
+    $nav.Controls.Add($navDevice.Row, 0, 5); $nav.Controls.Add($navApprov.Row, 0, 6)
+    $nav.Controls.Add($connPanel, 0, 8)
     $root.Controls.Add($nav, 0, 0)
 
     # ----- Content: header / page host / status bar ----------------------------------------
@@ -138,20 +140,21 @@ function New-MainForm {
         OnPremBtn = $onpremBtn; OnPremLabel = $onpremLabel; ConfigBtn = $configBtn
         ConnLabel = $connLabel; Status = $status; Progress = $progress
         NavPanel = $nav; PageHost = $pageHost; HeaderTitle = $hdrTitle; CurrentPage = 'User'
-        NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button; Device = $navDevice.Button }
-        NavStrips  = @{ User = $navUser.Strip;  Group = $navGroup.Strip;  Exchange = $navExch.Strip;  Device = $navDevice.Strip }
-        NavIcons   = @{ User = $navUser.Icon;   Group = $navGroup.Icon;   Exchange = $navExch.Icon;   Device = $navDevice.Icon }
-        User = $null; Group = $null; Exchange = $null; Device = $null
+        NavButtons = @{ User = $navUser.Button; Group = $navGroup.Button; Exchange = $navExch.Button; Device = $navDevice.Button; Approval = $navApprov.Button }
+        NavStrips  = @{ User = $navUser.Strip;  Group = $navGroup.Strip;  Exchange = $navExch.Strip;  Device = $navDevice.Strip;  Approval = $navApprov.Strip }
+        NavIcons   = @{ User = $navUser.Icon;   Group = $navGroup.Icon;   Exchange = $navExch.Icon;   Device = $navDevice.Icon;   Approval = $navApprov.Icon }
+        User = $null; Group = $null; Exchange = $null; Device = $null; Approval = $null
     }
 
     # Build the pages (Panels now, not TabPages) and stack them in the content host; one shows at a time
     # (Select-NavPage toggles visibility -- only the visible Dock=Fill page claims the space).
-    foreach ($p in @((New-EntityTab -Tab 'User' -Title 'Users'), (New-EntityTab -Tab 'Group' -Title 'Groups'), (New-ExchangeTab), (New-DeviceTab))) {
+    foreach ($p in @((New-EntityTab -Tab 'User' -Title 'Users'), (New-EntityTab -Tab 'Group' -Title 'Groups'), (New-ExchangeTab), (New-DeviceTab), (New-ApprovalsTab))) {
         $p.Dock = 'Fill'; $p.Visible = $false
         $pageHost.Controls.Add($p)
     }
     Update-ExchangeActivation   # show the gated empty-state until Exchange is activated
     Update-DeviceActivation     # show the gated empty-state until connected
+    Update-ApprovalsActivation
 
     # --- Wire nav + connection events ------------------------------------------------------
     foreach ($item in @($navUser, $navGroup, $navExch, $navDevice)) {
@@ -242,17 +245,17 @@ function Set-NavItemSelected {
 function Select-NavPage {
     <# Show one content page (User / Group / Exchange), select its nav item, set the header title, and
        re-point the Enter/AcceptButton. Replaces the old TabControl selection. #>
-    param([ValidateSet('User', 'Group', 'Exchange', 'Device')][string]$Page)
+    param([ValidateSet('User', 'Group', 'Exchange', 'Device', 'Approval')][string]$Page)
     if (-not $script:UI) { return }
     $script:UI.CurrentPage = $Page
-    foreach ($k in 'User', 'Group', 'Exchange', 'Device') {
+    foreach ($k in 'User', 'Group', 'Exchange', 'Device', 'Approval') {
         $ctx = $script:UI[$k]
         $pg = if ($ctx) { $ctx.Page } else { $null }
         $sel = ($k -eq $Page)
         if ($pg) { $pg.Visible = $sel; if ($sel) { $pg.BringToFront() } }
         Set-NavItemSelected -Key $k -Selected $sel
     }
-    $script:UI.HeaderTitle.Text = switch ($Page) { 'User' { 'Users' } 'Group' { 'Groups' } 'Exchange' { 'Exchange' } 'Device' { 'Devices' } }
+    $script:UI.HeaderTitle.Text = switch ($Page) { 'User' { 'Users' } 'Group' { 'Groups' } 'Exchange' { 'Exchange' } 'Device' { 'Devices' } 'Approval' { 'Approvals' } }
     Set-FormAcceptButton
 }
 
@@ -286,7 +289,7 @@ function Invoke-NavSwitch {
     <# Nav-button click with an unsaved-changes guard. The edits are NOT lost on a tab switch -- they stay
        in the form -- but the operator should know they're unsaved (and that saving the other tab won't
        save them) before moving on. #>
-    param([ValidateSet('User', 'Group', 'Exchange', 'Device')][string]$Page)
+    param([ValidateSet('User', 'Group', 'Exchange', 'Device', 'Approval')][string]$Page)
     if ($script:UI.CurrentPage -eq $Page) { return }
     if (-not (Confirm-LeaveUnsavedChanges -ActionLabel "Switch to $Page")) { return }
     Select-NavPage -Page $Page
@@ -949,6 +952,7 @@ function Set-FormAcceptButton {
         'Group'    { $script:UI.Group.SaveBtn }
         'Exchange' { if ($script:UI.Exchange) { $script:UI.Exchange.SaveBtn } else { $null } }
         'Device'   { $null }   # an action page (destructive) -- Enter must never trigger a delete
+        'Approval' { $null }   # action page -- Enter must not trigger approve/reject
         default    { $null }
     }
     $script:UI.Form.AcceptButton = $btn
@@ -1091,6 +1095,7 @@ function Sync-ConnectionUi {
     Update-ConnectionLabel        # also re-runs Set-TabActionState for both tabs (re-shows the connect overlay if disconnected)
     Update-ExchangeActivation
     Update-DeviceActivation
+    Update-ApprovalsActivation
 }
 
 function Save-CurrentAccount {
@@ -1134,6 +1139,7 @@ function Complete-Connection {
         Update-ConnectionLabel
         Update-ExchangeActivation
         Update-DeviceActivation
+        Update-ApprovalsActivation
         Set-Progress 'Loading license SKUs...'
         Initialize-SkuMap                   # cache seeded by the batch -> no-op (per-call fetch only if not)
         Set-Progress 'Loading verified domains...'
@@ -1248,6 +1254,7 @@ function Invoke-Disconnect {
     Update-ConnectionLabel
     Update-ExchangeActivation          # re-gate the Exchange tab
     Update-DeviceActivation            # re-gate the Devices page
+    Update-ApprovalsActivation         # re-gate the Approvals page
     Set-Progress 'Disconnected.'
 }
 

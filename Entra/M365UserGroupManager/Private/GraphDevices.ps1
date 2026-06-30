@@ -57,6 +57,27 @@ function Remove-EntraDeviceObject {
     Invoke-MgGraphRequest -Method DELETE -Uri "https://graph.microsoft.com/v1.0/devices/$Id" -ErrorAction Stop | Out-Null
 }
 
+# --- Multi-Admin-Approval requests (beta operationApprovalRequests, via RAW Invoke-MgGraphRequest --
+#     deliberately NO Microsoft.Graph.Beta.* module, to avoid the assembly-version conflict) -----------
+
+function Get-PendingApprovalRequests {
+    <# Pending Multi-Admin-Approval requests (status = needsApproval) so a different admin can approve them.
+       Reads the beta operationApprovalRequests collection. Throws on failure (caller surfaces it). #>
+    $r = Invoke-MgGraphRequest -Method GET -OutputType Hashtable -ErrorAction Stop `
+        -Uri "https://graph.microsoft.com/beta/deviceManagement/operationApprovalRequests?`$filter=status eq 'needsApproval'"
+    return @($r.value)
+}
+
+function Submit-OperationApprovalDecision {
+    <# Approve or reject a pending operationApprovalRequest. $Decision = 'approve' | 'reject'. Delegated /
+       interactive ONLY (app auth can't), and you cannot approve your OWN request (the service enforces
+       separation of duties). Raw beta POST. Throws on failure. #>
+    param([Parameter(Mandatory)][string]$Id, [ValidateSet('approve', 'reject')][string]$Decision, [string]$Justification = '')
+    $body = @{ justification = $Justification; approvalSource = 'adminConsole' }
+    Invoke-MgGraphRequest -Method POST -Body $body -ErrorAction Stop `
+        -Uri "https://graph.microsoft.com/beta/deviceManagement/operationApprovalRequests/$Id/$Decision" | Out-Null
+}
+
 function Test-IntuneApprovalRequiredResponse {
     <# PURE: given an error record from a managed-device DELETE, is this the EXPECTED Multi-Admin-Approval
        403 ("ApprovalRequired") rather than a real failure? Match on the documented code/text; default to
