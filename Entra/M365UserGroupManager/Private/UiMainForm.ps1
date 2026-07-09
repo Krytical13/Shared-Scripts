@@ -2104,6 +2104,50 @@ function Show-TextInput {
     return $null
 }
 
+function Show-DetailDialog {
+    <# Read-only, COPYABLE detail/error dialog: a monospaced multiline textbox (selectable) + a Copy button.
+       Use to show full record details or the verbose text of an error the tech may need to paste. #>
+    param([string]$Title, [string]$Text, [switch]$Danger)
+    $t = Get-Theme
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = $Title; $dlg.Size = New-Object System.Drawing.Size(700, 470); $dlg.StartPosition = 'CenterParent'
+    $dlg.MinimumSize = New-Object System.Drawing.Size(440, 280); $dlg.Font = $t.FontBase; $dlg.ShowInTaskbar = $false
+    $root = New-Object System.Windows.Forms.TableLayoutPanel
+    $root.Dock = 'Fill'; $root.ColumnCount = 1; $root.RowCount = 2; $root.Padding = New-Object System.Windows.Forms.Padding(10)
+    [void]$root.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44)))
+    $box = New-Object System.Windows.Forms.TextBox
+    $box.Multiline = $true; $box.ReadOnly = $true; $box.ScrollBars = 'Both'; $box.WordWrap = $false; $box.Dock = 'Fill'
+    $box.Font = New-Object System.Drawing.Font('Consolas', 9); $box.Text = [string]$Text
+    $box.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
+    $bar = New-Object System.Windows.Forms.FlowLayoutPanel; $bar.Dock = 'Fill'; $bar.FlowDirection = 'RightToLeft'; $bar.WrapContents = $false
+    $close = New-Object System.Windows.Forms.Button; $close.Text = 'Close'; $close.DialogResult = 'OK'; $close.Width = 90; $close.Height = 30; $close.Margin = New-Object System.Windows.Forms.Padding(6, 4, 0, 4)
+    $copy = New-Object System.Windows.Forms.Button; $copy.Text = 'Copy'; $copy.Width = 90; $copy.Height = 30; $copy.Margin = New-Object System.Windows.Forms.Padding(6, 4, 0, 4)
+    $copy.Tag = $box   # so the plain-scriptblock click handler can reach the textbox without a closure
+    $copy.Add_Click({ param($s, $e) try { [System.Windows.Forms.Clipboard]::SetText([string]$s.Tag.Text) } catch { } })
+    $bar.Controls.AddRange(@($close, $copy))
+    $root.Controls.Add($box, 0, 0); $root.Controls.Add($bar, 0, 1)
+    $dlg.Controls.Add($root); $dlg.AcceptButton = $close; $dlg.CancelButton = $close
+    Set-DialogTheme -Form $dlg
+    if ($Danger) { Set-DangerButtonStyle $close } else { Set-PrimaryButtonStyle $close }
+    Set-SecondaryButtonStyle $copy
+    [void]$dlg.ShowDialog(); $dlg.Dispose()
+}
+
+function Get-VerboseErrorText {
+    <# Build a full, copy/paste-friendly string from an ErrorRecord: the exception message, the HTTP
+       RESPONSE BODY (ErrorDetails.Message -- where Graph puts {"error":{code,message}}), inner exceptions
+       and the script stack. Graph's Exception.Message is often just "403 (Forbidden)"; the body has the why. #>
+    param($ErrorRecord)
+    $parts = New-Object System.Collections.Generic.List[string]
+    try { if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Message) { [void]$parts.Add([string]$ErrorRecord.Exception.Message) } } catch { }
+    try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { [void]$parts.Add("Response body:`r`n$([string]$ErrorRecord.ErrorDetails.Message)") } } catch { }
+    try { $inner = $ErrorRecord.Exception.InnerException; while ($inner) { [void]$parts.Add("Inner: $([string]$inner.Message)"); $inner = $inner.InnerException } } catch { }
+    try { if ($ErrorRecord.ScriptStackTrace) { [void]$parts.Add("At:`r`n$([string]$ErrorRecord.ScriptStackTrace)") } } catch { }
+    return (($parts | Where-Object { $_ }) -join "`r`n`r`n")
+}
+
 function Invoke-ForceDirectorySync {
     <#
         Detect the Entra Connect server (cloud autofill -> persisted -> prompt), confirm reachability +

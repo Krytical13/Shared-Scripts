@@ -38,13 +38,13 @@ function New-ApprovalsTab {
     $headerRow.Controls.AddRange(@($title, $refreshBtn)); $content.Controls.Add($headerRow, 0, 0)
 
     $note = New-Object System.Windows.Forms.Label
-    $note.Text = "You can't approve your own request -- a different admin must. Approving here completes the change in the cloud (Intune still requires the original requestor to finalize device deletes)."
+    $note.Text = "You can't approve your own request -- a different admin must. Approving here completes the change in the cloud (Intune still requires the original requestor to finalize device deletes). Double-click a row for full details."
     $note.AutoSize = $true; $note.MaximumSize = New-Object System.Drawing.Size(700, 0); $note.ForeColor = $t.Muted; $note.Margin = New-Object System.Windows.Forms.Padding(4, 0, 4, 6)
     $content.Controls.Add($note, 0, 1)
 
     $list = New-Object System.Windows.Forms.ListView
     $list.Dock = 'Fill'; $list.View = 'Details'; $list.FullRowSelect = $true; $list.GridLines = $true; $list.MultiSelect = $false; $list.HideSelection = $false
-    [void]$list.Columns.Add('Requested', 140); [void]$list.Columns.Add('Requestor', 200); [void]$list.Columns.Add('Justification', 320); [void]$list.Columns.Add('Expires', 140)
+    [void]$list.Columns.Add('Requested', 125); [void]$list.Columns.Add('Requestor', 165); [void]$list.Columns.Add('Operation', 150); [void]$list.Columns.Add('Justification', 280); [void]$list.Columns.Add('Expires', 125)
     $content.Controls.Add($list, 0, 2)
 
     $actions = New-Object System.Windows.Forms.FlowLayoutPanel; $actions.Dock = 'Fill'; $actions.FlowDirection = 'LeftToRight'; $actions.WrapContents = $false
@@ -67,6 +67,12 @@ function New-ApprovalsTab {
     })
     $approveBtn.Add_Click({ Invoke-ApprovalDecision -Decision 'approve' })
     $rejectBtn.Add_Click({ Invoke-ApprovalDecision -Decision 'reject' })
+    $list.Add_DoubleClick({
+        $sel = $script:UI.Approval.List.SelectedItems
+        if ($sel.Count -gt 0 -and $sel[0].Tag -and $sel[0].Tag.Raw) {
+            Show-DetailDialog -Title 'Approval request details' -Text (Format-ApprovalDetail $sel[0].Tag.Raw)
+        }
+    })
 
     Set-ControlTheme -Root $page
     return $page
@@ -84,6 +90,51 @@ function Update-ApprovalsActivation {
     } else { $a.Content.BringToFront() }
 }
 
+function Get-ApprovalRequestorName {
+    <# The operationApprovalRequest 'requestor' is an identitySet (application/device/USER), NOT a user
+       object -- there is no userPrincipalName. Return the first identity's displayName (user preferred),
+       falling back to its id. #>
+    param($Request)
+    $requestor = Get-GraphVal $Request 'requestor'
+    if (-not $requestor) { return '' }
+    foreach ($kind in 'user', 'application', 'device') {
+        $ident = Get-GraphVal $requestor $kind
+        if (-not $ident) { continue }
+        $dn = [string](Get-GraphVal $ident 'displayName')
+        if ($dn) { return $dn }
+        $idv = [string](Get-GraphVal $ident 'id')
+        if ($idv) { return $idv }
+    }
+    return ''
+}
+
+function Get-ApprovalOperationText {
+    <# requiredOperationApprovalPolicyTypes is a string collection (e.g. deviceDelete, app, role) -- what
+       the request is asking to do. Join for the grid. #>
+    param($Request)
+    $ops = @(Get-GraphVal $Request 'requiredOperationApprovalPolicyTypes')
+    return (($ops | Where-Object { $_ } | ForEach-Object { [string]$_ }) -join ', ')
+}
+
+function Format-ApprovalDetail {
+    <# A labelled, copy/paste-friendly dump of every meaningful field on a request (for the details dialog). #>
+    param($Request)
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add("Request ID:     $([string](Get-GraphVal $Request 'id'))")
+    [void]$lines.Add("Status:         $([string](Get-GraphVal $Request 'status'))")
+    [void]$lines.Add("Requested:      $([string](Get-GraphVal $Request 'requestDateTime'))")
+    [void]$lines.Add("Expires:        $([string](Get-GraphVal $Request 'expirationDateTime'))")
+    [void]$lines.Add("Last modified:  $([string](Get-GraphVal $Request 'lastModifiedDateTime'))")
+    [void]$lines.Add("Requestor:      $(Get-ApprovalRequestorName $Request)")
+    [void]$lines.Add("Operation(s):   $(Get-ApprovalOperationText $Request)")
+    [void]$lines.Add("Justification:  $([string](Get-GraphVal $Request 'requestJustification'))")
+    $approver = Get-ApprovalRequestorName ([pscustomobject]@{ requestor = (Get-GraphVal $Request 'approver') })
+    if ($approver) { [void]$lines.Add("Approver:       $approver") }
+    $aj = [string](Get-GraphVal $Request 'approvalJustification')
+    if ($aj) { [void]$lines.Add("Approval note:  $aj") }
+    return ($lines -join "`r`n")
+}
+
 function Invoke-ApprovalsRefresh {
     <# Load pending MAA requests into the list. Graceful: a tenant without MAA / Intune just shows empty. #>
     if (-not (Test-GraphConnected)) { return }
@@ -95,21 +146,25 @@ function Invoke-ApprovalsRefresh {
         Invoke-WithProgress -Title 'Loading approvals' -Work {
             Set-Progress 'Reading pending Multi-Admin-Approval requests...'
             try { $script:UI.Approval.LoadedRequests = @(Get-PendingApprovalRequests) }
-            catch { $script:UI.Approval.LoadError = "$($_.Exception.Message)" }
+            catch { $script:UI.Approval.LoadError = (Get-VerboseErrorText $_) }
         } | Out-Null
         if ($script:UiClosing) { return }
         $reqs = @($a.LoadedRequests); $err = $a.LoadError; $a.LoadedRequests = $null; $a.LoadError = $null
 
         $a.List.Items.Clear(); $a.ApproveBtn.Enabled = $false; $a.RejectBtn.Enabled = $false
-        if ($err) { Set-Progress "Could not read approvals: $err"; return }
+        if ($err) {
+            Set-Progress 'Could not read approvals.'
+            Show-DetailDialog -Title 'Could not read approvals' -Danger -Text "Reading pending Multi-Admin-Approval requests failed.`r`n`r`n(This tenant may not have Intune / MAA enabled, or the account may lack the DeviceManagementRBAC.Read.All scope.)`r`n`r`n--- Error detail ---`r`n$err"
+            return
+        }
         foreach ($r in $reqs) {
-            $requestor = Get-GraphVal $r 'requestor'
-            $upn = if ($requestor) { [string](Get-GraphVal $requestor 'userPrincipalName') } else { '' }
+            $who = Get-ApprovalRequestorName $r
             $item = New-Object System.Windows.Forms.ListViewItem([string](Get-GraphVal $r 'requestDateTime'))
-            [void]$item.SubItems.Add($upn)
-            [void]$item.SubItems.Add([string](Get-GraphVal $r 'justification'))
+            [void]$item.SubItems.Add($who)
+            [void]$item.SubItems.Add((Get-ApprovalOperationText $r))
+            [void]$item.SubItems.Add([string](Get-GraphVal $r 'requestJustification'))
             [void]$item.SubItems.Add([string](Get-GraphVal $r 'expirationDateTime'))
-            $item.Tag = @{ Id = [string](Get-GraphVal $r 'id'); Upn = $upn }
+            $item.Tag = @{ Id = [string](Get-GraphVal $r 'id'); Upn = $who; Raw = $r }
             [void]$a.List.Items.Add($item)
         }
         Set-Progress "$($reqs.Count) pending approval request(s)."
@@ -135,12 +190,12 @@ function Invoke-ApprovalDecision {
         $ok = $true; $msg = ''
         Invoke-WithProgress -Title "$verb request" -Work {
             try { Submit-OperationApprovalDecision -Id $tag.Id -Decision $Decision -Justification $note }
-            catch { $script:UI.Approval.DecisionError = "$($_.Exception.Message)" }
+            catch { $script:UI.Approval.DecisionError = (Get-VerboseErrorText $_) }
         } | Out-Null
         if ($script:UiClosing) { return }
         $msg = $a.DecisionError; $a.DecisionError = $null
         if ($msg) {
-            [System.Windows.Forms.MessageBox]::Show("Couldn't $Decision the request:`n$msg`n`n(You can't approve your own request, and only an authorized admin can.)", "$verb failed", 'OK', 'Warning') | Out-Null
+            Show-DetailDialog -Title "$verb failed" -Danger -Text "Couldn't $Decision the request.`r`n`r`nCommon causes: you can't approve your OWN request (a different admin must), and only an authorized approver can act. The full error is below -- use Copy to share it with an admin.`r`n`r`n--- Error detail ---`r`n$msg"
         } else {
             Set-Progress "Request ${Decision}d."
         }

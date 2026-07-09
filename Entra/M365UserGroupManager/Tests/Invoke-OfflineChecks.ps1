@@ -926,6 +926,37 @@ Assert-That 'MAA approval decision builds the right beta approve/reject endpoint
         [bool]$hasDecision -and $noBeta -and [bool](Get-Command Get-PendingApprovalRequests -ErrorAction SilentlyContinue)
     }
 }
+Assert-That 'Approval request mapping reads the REAL beta schema (requestor.user.displayName / requestJustification / policy types)' {
+    & $mod {
+        # Shape per operationApprovalRequest beta docs: requestor is an identitySet (NOT a user with UPN);
+        # justification is 'requestJustification'; the operation is 'requiredOperationApprovalPolicyTypes'.
+        $req = @{
+            id = 'req-123'; status = 'needsApproval'
+            requestDateTime = '2026-07-09T16:39:23Z'; expirationDateTime = '2026-07-12T16:39:23Z'
+            requestJustification = 'Re-image cleanup of LAPTOP-42'
+            requiredOperationApprovalPolicyTypes = @('deviceDelete')
+            requestor = @{ user = @{ id = 'u1'; displayName = 'Jane Admin' } }
+        }
+        $detail = Format-ApprovalDetail $req
+        ((Get-ApprovalRequestorName $req) -eq 'Jane Admin') -and
+        ((Get-ApprovalOperationText $req) -eq 'deviceDelete') -and
+        ([string](Get-GraphVal $req 'requestJustification') -eq 'Re-image cleanup of LAPTOP-42') -and
+        ($detail -match 'Jane Admin') -and ($detail -match 'deviceDelete') -and ($detail -match 'Re-image cleanup') -and
+        [bool](Get-Command Show-DetailDialog -ErrorAction SilentlyContinue) -and
+        [bool](Get-Command Get-VerboseErrorText -ErrorAction SilentlyContinue)
+    }
+}
+Assert-That 'Get-VerboseErrorText includes the HTTP response body (ErrorDetails.Message) for copy/paste' {
+    & $mod {
+        $er = [pscustomobject]@{
+            Exception = [pscustomobject]@{ Message = 'Response status code does not indicate success: 403 (Forbidden).' }
+            ErrorDetails = [pscustomobject]@{ Message = '{"error":{"code":"Forbidden","message":"You cannot approve your own request."}}' }
+            ScriptStackTrace = 'at Submit-OperationApprovalDecision'
+        }
+        $txt = Get-VerboseErrorText $er
+        ($txt -match '403') -and ($txt -match 'cannot approve your own request') -and ($txt -match 'Response body')
+    }
+}
 
 Write-Host "`n== Headless form build ==" -ForegroundColor Cyan
 $env:M365UGM_NOLAUNCH = '1'
