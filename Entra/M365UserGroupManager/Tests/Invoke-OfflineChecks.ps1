@@ -954,7 +954,16 @@ Assert-That 'Get-VerboseErrorText includes the HTTP response body (ErrorDetails.
             ScriptStackTrace = 'at Submit-OperationApprovalDecision'
         }
         $txt = Get-VerboseErrorText $er
-        ($txt -match '403') -and ($txt -match 'cannot approve your own request') -and ($txt -match 'Response body')
+        ($txt -match '403') -and ($txt -match 'cannot approve your own request') -and ($txt -match 'Response body') -and ($txt -match 'Reason:')
+    }
+}
+Assert-That 'Get-GraphErrorSummary extracts the reason from Intune''s doubly-nested BadRequest body' {
+    & $mod {
+        # Real shape the tech hit: error.message is itself a JSON blob with a "Message" field + support noise.
+        $inner = '{"_version":3,"Message":"Requesting user does not have proper permissions to approve - Operation ID (for customer support): 000 - Activity ID: abc - Url: https://x"}'
+        $body = @{ error = @{ code = 'BadRequest'; message = $inner } } | ConvertTo-Json -Compress
+        $er = [pscustomobject]@{ ErrorDetails = [pscustomobject]@{ Message = $body } }
+        (Get-GraphErrorSummary $er) -eq 'Requesting user does not have proper permissions to approve'
     }
 }
 

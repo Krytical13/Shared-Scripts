@@ -2135,12 +2135,35 @@ function Show-DetailDialog {
     [void]$dlg.ShowDialog(); $dlg.Dispose()
 }
 
+function Get-GraphErrorSummary {
+    <# Best-effort: pull the human-readable reason out of a Graph error RESPONSE BODY (ErrorDetails.Message),
+       including Intune's doubly-nested {"error":{"message":"{...\"Message\":\"...\"}"}} shape. Trims the
+       trailing "- Operation ID... - Url:..." support noise. Returns '' if it can't parse (callers still
+       show the full raw body), so this only ever ADDS a friendly lead line. #>
+    param($ErrorRecord)
+    $body = ''
+    try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { $body = [string]$ErrorRecord.ErrorDetails.Message } } catch { }
+    if (-not $body) { return '' }
+    try {
+        $j = $body | ConvertFrom-Json -ErrorAction Stop
+        $msg = [string]$j.error.message
+        if ($msg -match '^\s*\{') {   # Intune wraps a second JSON blob (with a 'Message' field) inside .message
+            try { $inner = $msg | ConvertFrom-Json -ErrorAction Stop; if ($inner.Message) { $msg = [string]$inner.Message } } catch { }
+        }
+        $msg = (($msg -split ' - Operation ID')[0] -split ' - Activity ID')[0]
+        return $msg.Trim()
+    } catch { return '' }
+}
+
 function Get-VerboseErrorText {
-    <# Build a full, copy/paste-friendly string from an ErrorRecord: the exception message, the HTTP
-       RESPONSE BODY (ErrorDetails.Message -- where Graph puts {"error":{code,message}}), inner exceptions
-       and the script stack. Graph's Exception.Message is often just "403 (Forbidden)"; the body has the why. #>
+    <# Build a full, copy/paste-friendly string from an ErrorRecord: a friendly REASON line (extracted from
+       the Graph body), then the exception message, the HTTP RESPONSE BODY (ErrorDetails.Message -- where
+       Graph puts {"error":{code,message}}), inner exceptions and the script stack. Graph's Exception.Message
+       is often just "400/403"; the body has the why. #>
     param($ErrorRecord)
     $parts = New-Object System.Collections.Generic.List[string]
+    $reason = Get-GraphErrorSummary $ErrorRecord
+    if ($reason) { [void]$parts.Add("Reason: $reason") }
     try { if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Message) { [void]$parts.Add([string]$ErrorRecord.Exception.Message) } } catch { }
     try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { [void]$parts.Add("Response body:`r`n$([string]$ErrorRecord.ErrorDetails.Message)") } } catch { }
     try { $inner = $ErrorRecord.Exception.InnerException; while ($inner) { [void]$parts.Add("Inner: $([string]$inner.Message)"); $inner = $inner.InnerException } } catch { }
