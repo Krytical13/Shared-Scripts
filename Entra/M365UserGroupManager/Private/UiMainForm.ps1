@@ -2118,7 +2118,8 @@ function Show-DetailDialog {
     [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))
     [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Absolute, 44)))
     $box = New-Object System.Windows.Forms.TextBox
-    $box.Multiline = $true; $box.ReadOnly = $true; $box.ScrollBars = 'Both'; $box.WordWrap = $false; $box.Dock = 'Fill'
+    # Wrap long lines (URLs / JSON / stack frames) so the tech reads top-to-bottom, no horizontal scroll.
+    $box.Multiline = $true; $box.ReadOnly = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true; $box.Dock = 'Fill'
     $box.Font = New-Object System.Drawing.Font('Consolas', 9); $box.Text = [string]$Text
     $box.Margin = New-Object System.Windows.Forms.Padding(0, 0, 0, 8)
     $bar = New-Object System.Windows.Forms.FlowLayoutPanel; $bar.Dock = 'Fill'; $bar.FlowDirection = 'RightToLeft'; $bar.WrapContents = $false
