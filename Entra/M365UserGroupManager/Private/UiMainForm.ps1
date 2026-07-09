@@ -2136,6 +2136,71 @@ function Show-DetailDialog {
     [void]$dlg.ShowDialog(); $dlg.Dispose()
 }
 
+function Show-ErrorDialog {
+    <# Progressive-disclosure error dialog: a prominent one-line SUMMARY (the reason) + an optional HINT,
+       with the full technical DETAIL collapsed behind "Show details". Copy always grabs the WHOLE thing
+       (summary + detail) so support gets everything even while collapsed. Zero P/Invoke -- a custom
+       WinForms expander, since .NET Framework 4.x (PS 5.1) has no managed TaskDialog. #>
+    param([string]$Title, [string]$Summary, [string]$Detail, [string]$Hint)
+    $t = Get-Theme
+    $wrapW = 470
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = $Title; $dlg.StartPosition = 'CenterParent'; $dlg.FormBorderStyle = 'Sizable'
+    $dlg.MinimizeBox = $false; $dlg.MaximizeBox = $true; $dlg.ShowInTaskbar = $false; $dlg.Font = $t.FontBase
+    $dlg.ClientSize = New-Object System.Drawing.Size(($wrapW + 40), 172)
+    $dlg.MinimumSize = New-Object System.Drawing.Size(($wrapW + 56), 208)
+
+    $root = New-Object System.Windows.Forms.TableLayoutPanel
+    $root.Dock = 'Fill'; $root.ColumnCount = 1; $root.RowCount = 4; $root.Padding = New-Object System.Windows.Forms.Padding(14, 12, 14, 10)
+    [void]$root.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle([System.Windows.Forms.SizeType]::Percent, 100)))
+    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))       # summary
+    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))       # hint
+    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::Percent, 100)))   # detail (collapsed)
+    [void]$root.RowStyles.Add((New-Object System.Windows.Forms.RowStyle([System.Windows.Forms.SizeType]::AutoSize)))       # buttons
+
+    $sumLbl = New-Object System.Windows.Forms.Label
+    $sumLbl.Text = $Summary; $sumLbl.AutoSize = $true; $sumLbl.MaximumSize = New-Object System.Drawing.Size($wrapW, 0)
+    $sumLbl.Font = $t.FontMedium; $sumLbl.ForeColor = $t.Text; $sumLbl.Margin = New-Object System.Windows.Forms.Padding(3, 3, 3, 8)
+    $root.Controls.Add($sumLbl, 0, 0)
+
+    if ($Hint) {
+        $hintLbl = New-Object System.Windows.Forms.Label
+        $hintLbl.Text = $Hint; $hintLbl.AutoSize = $true; $hintLbl.MaximumSize = New-Object System.Drawing.Size($wrapW, 0)
+        $hintLbl.ForeColor = $t.Muted; $hintLbl.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 8)
+        $root.Controls.Add($hintLbl, 0, 1)
+    }
+
+    $box = New-Object System.Windows.Forms.TextBox
+    $box.Multiline = $true; $box.ReadOnly = $true; $box.ScrollBars = 'Vertical'; $box.WordWrap = $true; $box.Dock = 'Fill'
+    $box.Font = New-Object System.Drawing.Font('Consolas', 9); $box.Text = [string]$Detail; $box.Visible = $false
+    $box.Margin = New-Object System.Windows.Forms.Padding(3, 0, 3, 8)
+    $root.Controls.Add($box, 0, 2)
+
+    $bar = New-Object System.Windows.Forms.FlowLayoutPanel; $bar.Dock = 'Fill'; $bar.FlowDirection = 'RightToLeft'; $bar.WrapContents = $false; $bar.AutoSize = $true
+    $close = New-Object System.Windows.Forms.Button; $close.Text = 'Close'; $close.DialogResult = 'OK'; $close.Width = 90; $close.Height = 30; $close.Margin = New-Object System.Windows.Forms.Padding(6, 4, 0, 4)
+    $copy = New-Object System.Windows.Forms.Button; $copy.Text = 'Copy'; $copy.Width = 90; $copy.Height = 30; $copy.Margin = New-Object System.Windows.Forms.Padding(6, 4, 0, 4)
+    $toggle = New-Object System.Windows.Forms.Button; $toggle.Text = "Show details  $([char]0x25BE)"; $toggle.Width = 130; $toggle.Height = 30; $toggle.Margin = New-Object System.Windows.Forms.Padding(6, 4, 0, 4)
+    # Copy grabs summary + full detail (support needs the request-ids); refs travel on .Tag so the handlers
+    # stay plain scriptblocks (no closure -- the AST lint forbids closures that touch module state).
+    $copy.Tag = ("$Summary`r`n`r`n$Detail")
+    $copy.Add_Click({ param($s, $e) try { [System.Windows.Forms.Clipboard]::SetText([string]$s.Tag) } catch { } })
+    $toggle.Tag = @{ Box = $box; Form = $dlg }
+    $toggle.Add_Click({
+        param($s, $e)
+        $b = $s.Tag.Box; $f = $s.Tag.Form
+        $b.Visible = -not $b.Visible
+        if ($b.Visible) { $s.Text = "Hide details  $([char]0x25B4)"; if ($f.ClientSize.Height -lt 380) { $f.ClientSize = New-Object System.Drawing.Size($f.ClientSize.Width, 460) } }
+        else { $s.Text = "Show details  $([char]0x25BE)"; $f.ClientSize = New-Object System.Drawing.Size($f.ClientSize.Width, 172) }
+    })
+    $bar.Controls.AddRange(@($close, $copy, $toggle))
+    $root.Controls.Add($bar, 0, 3)
+
+    $dlg.Controls.Add($root); $dlg.AcceptButton = $close; $dlg.CancelButton = $close
+    Set-DialogTheme -Form $dlg
+    Set-DangerButtonStyle $close; Set-SecondaryButtonStyle $copy; Set-SecondaryButtonStyle $toggle
+    [void]$dlg.ShowDialog(); $dlg.Dispose()
+}
+
 function Get-GraphErrorSummary {
     <# Best-effort: pull the human-readable reason out of a Graph error RESPONSE BODY (ErrorDetails.Message),
        including Intune's doubly-nested {"error":{"message":"{...\"Message\":\"...\"}"}} shape. Trims the
@@ -2162,15 +2227,25 @@ function Get-GraphErrorSummary {
     } catch { return '' }
 }
 
+function Get-ErrorParts {
+    <# Split an ErrorRecord into a one-line SUMMARY (the human reason -- the Graph body's message if we can
+       parse it, else the first line of the exception) and the full technical DETAIL (Get-VerboseErrorText).
+       Feeds the progressive-disclosure error dialog: summary up top, detail behind "Show details". #>
+    param($ErrorRecord)
+    $summary = Get-GraphErrorSummary $ErrorRecord
+    if (-not $summary) {
+        try { $summary = (([string]$ErrorRecord.Exception.Message) -split "`r?`n")[0].Trim() } catch { }
+    }
+    if (-not $summary) { $summary = 'The operation failed.' }
+    return @{ Summary = $summary; Detail = (Get-VerboseErrorText $ErrorRecord) }
+}
+
 function Get-VerboseErrorText {
-    <# Build a full, copy/paste-friendly string from an ErrorRecord: a friendly REASON line (extracted from
-       the Graph body), then the exception message, the HTTP RESPONSE BODY (ErrorDetails.Message -- where
-       Graph puts {"error":{code,message}}), inner exceptions and the script stack. Graph's Exception.Message
-       is often just "400/403"; the body has the why. #>
+    <# Build the full, copy/paste-friendly technical dump from an ErrorRecord: the exception message, the
+       HTTP RESPONSE BODY (ErrorDetails.Message -- where Graph puts {"error":{code,message}}), inner
+       exceptions and the script stack. (The human reason is surfaced separately via Get-ErrorParts.) #>
     param($ErrorRecord)
     $parts = New-Object System.Collections.Generic.List[string]
-    $reason = Get-GraphErrorSummary $ErrorRecord
-    if ($reason) { [void]$parts.Add("Reason: $reason") }
     try { if ($ErrorRecord.Exception -and $ErrorRecord.Exception.Message) { [void]$parts.Add([string]$ErrorRecord.Exception.Message) } } catch { }
     try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { [void]$parts.Add("Response body:`r`n$([string]$ErrorRecord.ErrorDetails.Message)") } } catch { }
     try { $inner = $ErrorRecord.Exception.InnerException; while ($inner) { [void]$parts.Add("Inner: $([string]$inner.Message)"); $inner = $inner.InnerException } } catch { }

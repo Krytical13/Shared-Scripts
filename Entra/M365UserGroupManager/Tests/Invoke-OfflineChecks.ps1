@@ -954,7 +954,25 @@ Assert-That 'Get-VerboseErrorText includes the HTTP response body (ErrorDetails.
             ScriptStackTrace = 'at Submit-OperationApprovalDecision'
         }
         $txt = Get-VerboseErrorText $er
-        ($txt -match '403') -and ($txt -match 'cannot approve your own request') -and ($txt -match 'Response body') -and ($txt -match 'Reason:')
+        ($txt -match '403') -and ($txt -match 'cannot approve your own request') -and ($txt -match 'Response body')
+    }
+}
+Assert-That 'Get-ErrorParts splits reason SUMMARY vs full DETAIL for the progressive dialog; Show-ErrorDialog exists' {
+    & $mod {
+        $er = [pscustomobject]@{
+            Exception = [pscustomobject]@{ Message = 'Response status code does not indicate success: 400 (Bad Request).' }
+            ErrorDetails = [pscustomobject]@{ Message = '{"error":{"code":"BadRequest","message":"Requesting user does not have proper permissions to approve"}}' }
+        }
+        $p = Get-ErrorParts $er
+        ($p.Summary -eq 'Requesting user does not have proper permissions to approve') -and
+        ($p.Detail -match 'Response body') -and ($p.Detail -match '400') -and (-not ($p.Detail -match 'Reason:')) -and
+        [bool](Get-Command Show-ErrorDialog -ErrorAction SilentlyContinue)
+    }
+}
+Assert-That 'Get-ErrorParts falls back to the exception first line when there is no parseable Graph reason' {
+    & $mod {
+        $er = [pscustomobject]@{ Exception = [pscustomobject]@{ Message = "Could not reach the sync server.`r`nWinRM operation timed out." } }
+        (Get-ErrorParts $er).Summary -eq 'Could not reach the sync server.'
     }
 }
 Assert-That 'Get-GraphErrorSummary extracts the reason from the FULL HTTP response (headers + doubly-nested body)' {

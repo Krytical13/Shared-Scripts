@@ -146,7 +146,7 @@ function Invoke-ApprovalsRefresh {
         Invoke-WithProgress -Title 'Loading approvals' -Work {
             Set-Progress 'Reading pending Multi-Admin-Approval requests...'
             try { $script:UI.Approval.LoadedRequests = @(Get-PendingApprovalRequests) }
-            catch { $script:UI.Approval.LoadError = (Get-VerboseErrorText $_) }
+            catch { $script:UI.Approval.LoadError = (Get-ErrorParts $_) }
         } | Out-Null
         if ($script:UiClosing) { return }
         $reqs = @($a.LoadedRequests); $err = $a.LoadError; $a.LoadedRequests = $null; $a.LoadError = $null
@@ -154,7 +154,8 @@ function Invoke-ApprovalsRefresh {
         $a.List.Items.Clear(); $a.ApproveBtn.Enabled = $false; $a.RejectBtn.Enabled = $false
         if ($err) {
             Set-Progress 'Could not read approvals.'
-            Show-DetailDialog -Title 'Could not read approvals' -Danger -Text "Reading pending Multi-Admin-Approval requests failed.`r`n`r`n(This tenant may not have Intune / MAA enabled, or the account may lack the DeviceManagementRBAC.Read.All scope.)`r`n`r`n--- Error detail ---`r`n$err"
+            Show-ErrorDialog -Title 'Could not read approvals' -Summary $err.Summary -Detail $err.Detail `
+                -Hint 'This tenant may not have Intune / MAA enabled, or the account may lack the DeviceManagementRBAC.Read.All scope.'
             return
         }
         foreach ($r in $reqs) {
@@ -190,12 +191,13 @@ function Invoke-ApprovalDecision {
         $ok = $true; $msg = ''
         Invoke-WithProgress -Title "$verb request" -Work {
             try { Submit-OperationApprovalDecision -Id $tag.Id -Decision $Decision -Justification $note }
-            catch { $script:UI.Approval.DecisionError = (Get-VerboseErrorText $_) }
+            catch { $script:UI.Approval.DecisionError = (Get-ErrorParts $_) }
         } | Out-Null
         if ($script:UiClosing) { return }
-        $msg = $a.DecisionError; $a.DecisionError = $null
-        if ($msg) {
-            Show-DetailDialog -Title "$verb failed" -Danger -Text "Couldn't $Decision the request.`r`n`r`nCommon causes: you can't approve your OWN request (a different admin must), and only an authorized approver can act. The full error is below -- use Copy to share it with an admin.`r`n`r`n--- Error detail ---`r`n$msg"
+        $err = $a.DecisionError; $a.DecisionError = $null
+        if ($err) {
+            Show-ErrorDialog -Title "$verb failed" -Summary $err.Summary -Detail $err.Detail `
+                -Hint "You can't approve your OWN request (a different admin must), and only an authorized approver on that policy can act. Use Copy to share the full detail with an admin."
         } else {
             Set-Progress "Request ${Decision}d."
         }
