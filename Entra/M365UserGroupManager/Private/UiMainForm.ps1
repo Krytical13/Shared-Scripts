@@ -2145,8 +2145,14 @@ function Get-GraphErrorSummary {
     $body = ''
     try { if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) { $body = [string]$ErrorRecord.ErrorDetails.Message } } catch { }
     if (-not $body) { return '' }
+    # ErrorDetails.Message may be the pure JSON body OR the WHOLE HTTP response (request line + headers +
+    # blank line + body). Isolate the Graph error envelope by name -- can't just take the first '{' because
+    # a header like x-ms-ags-diagnostic carries its own {...} JSON before the real body.
+    $jsonText = $body
+    $m = [regex]::Match($body, '\{\s*"error"\s*:')
+    if ($m.Success) { $jsonText = $body.Substring($m.Index) }
     try {
-        $j = $body | ConvertFrom-Json -ErrorAction Stop
+        $j = $jsonText | ConvertFrom-Json -ErrorAction Stop
         $msg = [string]$j.error.message
         if ($msg -match '^\s*\{') {   # Intune wraps a second JSON blob (with a 'Message' field) inside .message
             try { $inner = $msg | ConvertFrom-Json -ErrorAction Stop; if ($inner.Message) { $msg = [string]$inner.Message } } catch { }

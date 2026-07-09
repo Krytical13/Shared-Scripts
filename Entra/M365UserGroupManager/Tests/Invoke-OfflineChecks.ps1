@@ -957,12 +957,22 @@ Assert-That 'Get-VerboseErrorText includes the HTTP response body (ErrorDetails.
         ($txt -match '403') -and ($txt -match 'cannot approve your own request') -and ($txt -match 'Response body') -and ($txt -match 'Reason:')
     }
 }
-Assert-That 'Get-GraphErrorSummary extracts the reason from Intune''s doubly-nested BadRequest body' {
+Assert-That 'Get-GraphErrorSummary extracts the reason from the FULL HTTP response (headers + doubly-nested body)' {
     & $mod {
-        # Real shape the tech hit: error.message is itself a JSON blob with a "Message" field + support noise.
-        $inner = '{"_version":3,"Message":"Requesting user does not have proper permissions to approve - Operation ID (for customer support): 000 - Activity ID: abc - Url: https://x"}'
-        $body = @{ error = @{ code = 'BadRequest'; message = $inner } } | ConvertTo-Json -Compress
-        $er = [pscustomobject]@{ ErrorDetails = [pscustomobject]@{ Message = $body } }
+        # Exactly the shape Invoke-MgGraphRequest surfaces: ErrorDetails.Message = the whole HTTP response
+        # (request line + headers, incl. an x-ms-ags-diagnostic header that ITSELF contains {...} JSON, a
+        # blank line, then the error body whose .message is a SECOND JSON blob with a "Message" field).
+        $inner = '{\r\n  \"_version\": 3,\r\n  \"Message\": \"Requesting user does not have proper permissions to approve - Operation ID (for customer support): 000 - Activity ID: abc - Url: https://x\"\r\n}'
+        $errBody = '{"error":{"code":"BadRequest","message":"' + $inner + '","innerError":{"date":"2026-07-09"}}}'
+        $full = @(
+            'POST https://graph.microsoft.com/beta/deviceManagement/operationApprovalRequests/abc/approve'
+            'HTTP/1.1 400 Bad Request'
+            'x-ms-ags-diagnostic: {"ServerInfo":{"DataCenter":"West US","Ring":"4"}}'
+            'Content-Type: application/json'
+            ''
+            $errBody
+        ) -join "`r`n"
+        $er = [pscustomobject]@{ ErrorDetails = [pscustomobject]@{ Message = $full } }
         (Get-GraphErrorSummary $er) -eq 'Requesting user does not have proper permissions to approve'
     }
 }
